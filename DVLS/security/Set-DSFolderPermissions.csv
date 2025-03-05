@@ -1,0 +1,3 @@
+FolderID,Permission,Role,Operation,Items
+b694ba69-865b-4b96-9a82-63f887fad5c2,Edit,Custom,Replace,bob@downhill.loc;DOWNHILL\Testgroup;DOWNHILL\TestGroup2
+b694ba69-865b-4b96-9a82-63f887fad5c2,Delete,Custom,Replace,bob@downhill.loc;DOWNHILL\Testgroup;DOWNHILL\TestGroup2
