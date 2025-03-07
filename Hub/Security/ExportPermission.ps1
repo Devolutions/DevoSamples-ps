@@ -80,8 +80,8 @@ function Display-EntryPermissions {
 
 <# Change variables below #>
 $url = '<your url>'
-$appSecret = '<your app key>';
-$appKey = '<your app secret>';
+$appSecret = '<your app secret>';
+$appKey = '<your app key>';
 
 <# Connect #>
 Connect-HubAccount -Url $url -ApplicationKey $appKey -ApplicationSecret $appSecret;
