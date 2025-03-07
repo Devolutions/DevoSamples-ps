@@ -79,9 +79,9 @@ function Display-EntryPermissions {
 
 
 <# Change variables below #>
-$url = 'https://pathub.devolutions.app/'
-$appSecret = 'klMZfZeAPBG8rcKBrKIW/odA+BOMT1Z7GqcaqaPFDgo=';
-$appKey = '778bc075-bd48-45fe-b89a-fa5512cd0725;6cd64424-5061-42fb-b875-8ffe281780e8';
+$url = '<your url>'
+$appSecret = '<your app key>';
+$appKey = '<your app secret>';
 
 <# Connect #>
 Connect-HubAccount -Url $url -ApplicationKey $appKey -ApplicationSecret $appSecret;
