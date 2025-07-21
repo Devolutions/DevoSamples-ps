@@ -20,7 +20,11 @@ foreach ($repo in $repos)
 
     $sessions = Get-RDMSession
     $reponame = $repo.name
-
-    # Adapt the destination path for file(s)
-    Export-RDMSession -Path "C:\temp\Sessions_$reponame.rdm" -Sessions $sessions -IncludeCredentials -XML -Password $passwd
+    if ($null -eq $sessions) {
+        Write-Host -BackgroundColor Gray -ForegroundColor Red "Warning! Vault '$($repo.name)' is empty – no file will be created."
+    }
+    else {
+        # Adapt the destination path for file(s)
+        Export-RDMSession -Path "C:\temp\Sessions_$reponame.rdm" -Sessions $sessions -IncludeCredentials -XML -Password $passwd
+    }
 }
