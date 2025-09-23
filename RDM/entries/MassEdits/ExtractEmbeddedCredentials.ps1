@@ -4,7 +4,7 @@
   This script should be used only if recommended by the support team only.
 
 .DESCRIPTION
-  Thhis script will extract the username and password from the legacy embedded credentials and will set it to 
+  This script will extract the username and password from the legacy embedded credentials and will set it to 
 
 .PARAMETER <Parameter_Name>
   None
