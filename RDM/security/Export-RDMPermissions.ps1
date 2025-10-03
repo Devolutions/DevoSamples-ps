@@ -1,7 +1,26 @@
-##########
-#
-# Object : Export folders' permissions of all vaults
-#
+<#
+.SYNOPSIS
+  Exports folder permissions for every vault (or a specific vault) in Remote Desktop Manager (RDM) to a CSV file.
+
+.DESCRIPTION
+  Ensures the Devolutions.PowerShell module is available, switches to the requested data source, and iterates through
+  vaults and folders (optionally filtered by depth). For each folder it captures role overrides and detailed permission
+  assignments, emitting them to a CSV that conforms to the documented column layout.
+
+  Provide the target data source, output file path, and optional log/vault/depth parameters when invoking the script.
+
+.NOTES
+  - Requires the Devolutions.PowerShell module; the script installs it for the current user if needed.
+  - Use the `-Verbose` switch alongside `-logFileName` for a detailed transcript of the export process.
+
+.EXAMPLE
+  PS> .\Export-RDMPermissions.ps1 -dsName 'MyDataSource' -fileName 'C:\Temp\permissions.csv' -Verbose
+  Captures permissions for every vault and writes them to the specified CSV while logging verbose output.
+
+.LINK
+  https://powershell.devolutions.net/
+#>
+
 # Parameters   :
 # $dsName      : Name of the RDM data source.
 # $fileName    : Name and full path of the exported CSV file.
@@ -44,25 +63,27 @@ param (
     [string]$folderLevel
     )
 
-#check if RDM PS module is installed
+# Ensure the Devolutions.PowerShell module is available before invoking any RDM cmdlets.
 if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
     Install-Module Devolutions.PowerShell -Scope CurrentUser
 }
 
-# CSV file creation
+# Seed the output file with the required CSV header row.
 Set-Content -Path $filename -Value '"Vault","Folder","RoleOverride","ViewRoles","Add","Edit","Move","Delete","ViewPassword","Execute","EditSecurity","ConnectionHistory","PasswordHistory","Remotetools","Inventory","Attachment","EditAttachment","Handbook","EditHandbook","EditInformation"'
 # $createCSV = {} | Select "Vault","Folder","RoleOverride","ViewRoles","Add","Edit","Delete","ViewPassword","Execute","EditSecurity","ConnectionHistory","PasswordHistory","Remotetools","Inventory","Attachment","EditAttachment","Handbook","EditHandbook","EditInformation" | Export-Csv $fileName
 # $csvFile = Import-Csv $fileName
 
-# Set the data source
+# Switch to the requested data source so repository calls execute in the correct context.
 $ds = Get-RDMDataSource -Name $dsName
 Set-RDMCurrentDataSource $ds
 
+# Optionally capture a transcript when a log file path is provided.
 if (-not [string]::IsNullOrEmpty($logFileName))
 {
     Start-Transcript -Path $logFileName -Force
 }
 
+# Scope the export to a single vault when requested; otherwise enumerate all vaults.
 if (-not [string]::IsNullOrEmpty($vaultName))
 {
     $vaults = Get-RDMRepository -Name $vaultName
@@ -82,15 +103,18 @@ foreach ($vault in $vaults)
     
     if (-not [string]::IsNullOrEmpty($folderLevel))
     {
+        # Limit folder enumeration to the requested depth (0-based index, so subtract one from desired level).
         $folders = Get-RDMSession | where {$_.ConnectionType -eq "Group" -and (($_.Group).Split("\").GetUpperBound(0) -le ($folderLevel - 1))}
     }
     else
     {
+        # No depth constraint; include every folder entry in the vault.
         $folders = Get-RDMSession | where {$_.ConnectionType -eq "Group"}
     }
     
     foreach ($folder in $folders)
     {
+        # Pre-populate the CSV row with base metadata and blank permission slots.
         $csvFile = [PSCustomObject]@{
             Vault = $vaultName
             Folder = $folder.Group
@@ -118,6 +142,7 @@ foreach ($vault in $vaults)
         
         if ($csvFile.RoleOverride -eq "Custom")
         {
+            # Record the view override directly or expand explicit roles/users into a semicolon-separated string.
             if ($folder.Security.ViewOverride -in "Everyone", "Default", "Never")
             {
                 $csvFile.ViewRoles = $folder.Security.ViewOverride
@@ -133,10 +158,12 @@ foreach ($vault in $vaults)
                 $permission = $folderPermission.Right
                 $permroles = $folderPermission.RoleValues
                 $permroles = $permroles -replace [Regex]::Escape(","), "; "
+                # Write the resolved role/user list into the matching permission column.
                 $csvFile."$permission" = $permroles
             }
         }
         
+        # Append the row to the destination CSV file.
         $csvFile | Export-Csv $fileName -Append
         Write-Verbose "Permissions exported for folder $folder..."
     }
@@ -146,6 +173,7 @@ foreach ($vault in $vaults)
 
 Write-Host "Done!!!"
 
+# Stop the transcript if one was started earlier.
 if (-not [string]::IsNullOrEmpty($logFileName))
 {
     Stop-Transcript

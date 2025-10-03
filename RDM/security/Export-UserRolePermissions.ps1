@@ -1,7 +1,27 @@
-##########
-#
-# Object : Export entries' permissions of all vaults for a given user or user group.
-#
+<#
+.SYNOPSIS
+  Exports entry or folder permissions for a specific user or role across Remote Desktop Manager (RDM) vaults.
+
+.DESCRIPTION
+  Ensures the Devolutions.PowerShell module is available, targets the requested data source, and gathers entries
+  or folders (depending on `-objectType` and optional depth filters). For each item it evaluates whether the
+  specified user/role inherits or receives direct rights and records the results in a CSV whose schema is detailed below.
+
+  Provide the data source name, CSV output path, and the user or role you wish to audit when invoking the script.
+
+.NOTES
+  - Requires the Devolutions.PowerShell module; the script installs it for the current user if missing.
+  - Use `-Verbose` together with `-logFileName` to capture a transcript of the export.
+
+.EXAMPLE
+  PS> .\Export-UserRolePermissions.ps1 -dsName 'MainDS' -fileName 'C:\Temp\user-perms.csv' -UserRoleName 'Ops Team' -objectType Entries
+  Writes permissions for every entry the `Ops Team` role can access into the specified CSV file.
+
+.LINK
+  https://powershell.devolutions.net/
+#>
+
+
 # Parameters   :
 # $dsName      : Name of the RDM data source.
 # $fileName    : Name and full path of the exported CSV file.
@@ -52,24 +72,26 @@ param (
     [string]$objectType = "All"
     )
 
-#check if RDM PS module is installed
+# Ensure the Devolutions.PowerShell module is available before invoking any RDM cmdlets.
 if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
     Install-Module Devolutions.PowerShell -Scope CurrentUser
 }
 
-# CSV file creation
+# Seed the CSV with the proper header row.
 Set-Content -Path $filename -Value '"Vault","Folder","Entry","Permission","View","Add","Edit","Move","Delete","ViewPassword","Execute","EditSecurity","ConnectionHistory","PasswordHistory","Remotetools","Inventory","Attachment","EditAttachment","Handbook","EditHandbook","DeleteHandbook","EditInformation"'
 
 
-# Set the data source
+# Switch to the requested data source so every subsequent command targets the correct backend.
 $ds = Get-RDMDataSource -Name $dsName
 Set-RDMCurrentDataSource $ds
 
+# Capture a verbose transcript when requested.
 if (-not [string]::IsNullOrEmpty($logFileName))
 {
     Start-Transcript -Path $logFileName -Force
 }
 
+# Limit the export to a specific vault when provided, otherwise enumerate all vaults the account can access.
 if (-not [string]::IsNullOrEmpty($vaultName))
 {
     $vaults = Get-RDMRepository -Name $vaultName
@@ -79,6 +101,7 @@ else
     $vaults = Get-RDMRepository
 }
 
+# Resolve the supplied name to either an RDM user or role; fall back to role lookup if no user matches.
 $UserorRole = Get-RDMUser -Name $UserRolename -ErrorAction SilentlyContinue -InformationAction SilentlyContinue -WarningAction SilentlyContinue
 if ([string]::IsNullOrEmpty($UserorRole))
 {
@@ -95,6 +118,7 @@ foreach ($vault in $vaults)
     
     switch ($objectType) {
         "All" {
+            # Include both folders and entries, optionally constrained by folder depth.
             if (-not [string]::IsNullOrEmpty($folderLevel))
             {
                 $entries = Get-RDMSession | where {(($_.Group).Split("\").GetUpperBound(0) -le ($folderLevel - 1))}
@@ -107,6 +131,7 @@ foreach ($vault in $vaults)
         }
         "Entries"
         {
+            # Limit the export to non-folder entries.
             if (-not [string]::IsNullOrEmpty($folderLevel))
             {
                 $entries = Get-RDMSession | where {$_.ConnectionType -ne "Group" -and (($_.Group).Split("\").GetUpperBound(0) -le ($folderLevel - 1))}
@@ -119,6 +144,7 @@ foreach ($vault in $vaults)
         }
         "Folders"
         {
+            # Limit the export exclusively to folder entries.
             if (-not [string]::IsNullOrEmpty($folderLevel))
             {
                 $entries = Get-RDMSession | where {$_.ConnectionType -eq "Group" -and (($_.Group).Split("\").GetUpperBound(0) -le ($folderLevel - 1))}
@@ -134,6 +160,7 @@ foreach ($vault in $vaults)
     
     foreach ($entry in $entries)
     {
+        # Initialize the CSV row for the current entry with default values.
         $csvFile = [PSCustomObject]@{
             Vault = $vaultName
             Folder = $entry.Group
@@ -168,6 +195,7 @@ foreach ($vault in $vaults)
         $csvFile.Permission = $entry.Security.RoleOverride
         if ($entry.Security.RoleOverride -eq "Custom")
         {
+            # Derive view permissions from the override, resolving explicit role membership when necessary.
             if ($entry.Security.ViewOverride -in "Everyone", "Default")
             {
                 $csvFile.View = $entry.Security.ViewOverride
@@ -190,6 +218,7 @@ foreach ($vault in $vaults)
                 $permission = $entryPermission.Right
                 $permroles = $entryPermission.RoleValues
                 $permroles = $permroles -replace [Regex]::Escape(","), "; "
+                # Flag the permission as granted when the user/role is explicitly listed or inherits via Everyone.
                 if ($UserorRole.ID -in $permroles -or $entryPermissions.Override -eq "Everyone")
                 {
                     $csvFile."$permission" = "True"
@@ -220,6 +249,7 @@ foreach ($vault in $vaults)
         }
         elseif ($entry.Security.RoleOverride -eq "Default")
         {
+            # Indicate that the entry inherits its rights from the parent container.
             $csvFile.View = "Inherited"
             $csvFile.Add = "Inherited"
             $csvFile.Edit = "Inherited"
@@ -244,6 +274,7 @@ foreach ($vault in $vaults)
         # Filter to provide only entries with View Password or Execute direct or inherited permissions 
         if ($csvfile.Execute -eq "True" -or $csvfile.Execute -eq "Inherited" -or $csvfile.ViewPassword -eq "True" -or $csvfile.ViewPassword -eq "Inherited")
         {
+            # Append matching rows to the CSV output and provide optional verbose feedback.
             $csvFile | Export-Csv $fileName -Append
             Write-Verbose "Permissions exported for entry $entry..."
         }

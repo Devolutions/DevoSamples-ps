@@ -1,22 +1,32 @@
-###########################################################################
-#
-#This PowerShell script will rename a role and edit all permissions.
-#
-#Rename-Role "OldRoleName" "NewRoleName" "MyDataSourceName" $true
-#
-#Parameter 1 : Old role name
-#Parameter 2 : New role name
-#Parameter 3 : Display name of the data source
-#Parameter 4 : $True = rename the role and change the role name in the permissions
-#                       $false = only change the role name in the permissions
-#
-#
-#
-###########################################################################
+<#
+.SYNOPSIS
+  Renames an RDM security role and updates every reference to that role inside session permissions.
 
-#check if RDM PS module is installed
-if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
-    Install-Module Devolutions.PowerShell -Scope CurrentUser
+.DESCRIPTION
+  Exposes the `Rename-Role` function, which:
+  - Ensures the Devolutions.PowerShell module is present before running.
+  - Switches to the requested data source.
+  - Optionally renames the role object itself.
+  - Walks through each vault and session to replace the old role name in view permissions and granular security rights.
+
+  Call `Rename-Role` with the old role name, new role name, data source, and a boolean indicating whether the role
+  object should be renamed in addition to updating permissions.
+
+.NOTES
+  - Requires the Devolutions.PowerShell module; installs it for the current user if missing.
+  - Set the `$chgRole` parameter to `$false` if the role already exists under the new name and only permissions should be updated.
+
+.EXAMPLE
+  PS> Rename-Role -oldRoleName 'Operations' -newRoleName 'Ops Team' -dsName 'MainDataSource' -chgRole $true
+  Renames the role from `Operations` to `Ops Team` and rewrites every session permission that referenced the old name.
+
+.LINK
+  https://powershell.devolutions.net/
+#>
+
+# Ensure the Devolutions.PowerShell module is available before invoking any RDM cmdlets.
+if (-not (Get-Module Devolutions.PowerShell -ListAvailable)) {
+    Install-Module Devolutions.PowerShell -Scope CurrentUser
 }
 
 function Rename-Role
@@ -29,33 +39,29 @@ function Rename-Role
         [Parameter(Mandatory=$True,Position=3)]
         [string]$dsName,
         [Parameter(Mandatory=$True,Position=4)]
-        [bool]$chgRole		
+        [bool]$chgRole
     )
 
-    # Set the data source
+    # Switch to the data source that hosts the target role and associated sessions.
     $ds = Get-RDMDataSource -Name $dsName
     Set-RDMCurrentDataSource $ds
 
-
-    # Renaming the role
+    # Optionally rename the role entity before updating downstream permissions.
     if ($chgRole)
     {
-        Try
+        try
         {
-            $role = Get-RDMRole -Name $oldRoleName -ErrorAction SilentlyContinue
-            $errorOccured = $false
-        }
-        catch
-        {
-            $errorOccured = $True
-        }
-        if (!$errorOccured)
-        {
+            $role = Get-RDMRole -Name $oldRoleName -ErrorAction Stop
             Set-RDMRoleProperty -Role $role -Property Name -Value $newRoleName
             Set-RDMRole $role
         }
+        catch
+        {
+            throw "Unable to find or rename role '$oldRoleName'."
+        }
     }
 
+    # Retrieve every repository and refresh the UI so session updates occur against current data.
     $repositories = Get-RDMRepository
 
     foreach ($repository in $repositories)
@@ -64,40 +70,33 @@ function Rename-Role
         Update-RDMUI
 
         $sessions = Get-RDMSession
-      
+
         foreach ($session in $sessions)
         {
-            [bool]$updateView = $false
-            [bool]$updatePerms = $false
+            $updateView = $false
+            $updatePerms = $false
 
-            # Replace role name in View permission
+            # Replace the role name in any view override entries.
             $roles = $session.Security.ViewRoles
             if ($roles -contains $oldRoleName)
             {
-                $roles = $roles -replace [Regex]::Escape($oldRoleName), $newRoleName
-                $session.Security.ViewRoles = $roles
-                $updateView = $True
+                $session.Security.ViewRoles = $roles -replace [Regex]::Escape($oldRoleName), $newRoleName
+                $updateView = $true
             }
 
-            # Replace role name in other permissions
+            # Replace the role in granular permission assignments and track whether updates occurred.
             $perms = $session.Security.Permissions
-            $newPerms = @()
             foreach ($perm in $perms)
             {
-                $roles = $perm.Roles
-                if ($roles -contains $oldRoleName)
+                $permRoles = $perm.Roles
+                if ($permRoles -contains $oldRoleName)
                 {
-                    $roles = $roles -replace [Regex]::Escape($oldRoleName), $newRoleName
-                    $perm.Roles = $roles
-                    $newPerms += $perm
-                    $updatePerms = $True
+                    $perm.Roles = $permRoles -replace [Regex]::Escape($oldRoleName), $newRoleName
+                    $updatePerms = $true
                 }
             }
-            if ($updatePerms)
-            {
-                $session.Security.Permissions = $newPerms
-            }
 
+            # Persist updates only when a change was detected.
             if ($updateView -or $updatePerms)
             {
                 Set-RDMSession $session -Refresh
