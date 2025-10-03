@@ -1,3 +1,26 @@
+<#
+.SYNOPSIS
+  Applies folder-level permissions within specified Remote Desktop Manager (RDM) vaults using settings defined in a CSV file.
+
+.DESCRIPTION
+  Ensures the Devolutions.PowerShell module is present, switches to the chosen data source, and iterates through each row
+  in the supplied CSV. For every folder entry it creates missing folders when required, sets view overrides, and assigns
+  granular permissions according to the CSV columns.
+
+  Provide the data source name, CSV path, and optional log file when calling the script.
+
+.NOTES
+  - Requires the Devolutions.PowerShell module; the script installs it for the current user if necessary.
+  - User principals must end with `|u` in the CSV so they are interpreted correctly when permissions are applied.
+
+.EXAMPLE
+  PS> .\SetPermissionsonFoldersInVault.ps1 -dsName 'ProdDS' -fileName 'C:\Temp\folder-perms.csv' -Verbose
+  Reads the CSV and applies the specified permissions to folders across the listed vaults.
+
+.LINK
+  https://powershell.devolutions.net/
+#>
+
 ##########
 #
 # Object : Set permissions on folders in given vaults
@@ -37,20 +60,22 @@ param (
     [string]$logFileName
     )
 
-#check if RDM PS module is installed
+# Ensure the Devolutions.PowerShell module is available before invoking any RDM cmdlets.
 if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
-    Install-Module Devolutions.PowerShell -Scope CurrentUser
+	Install-Module Devolutions.PowerShell -Scope CurrentUser
 }
 
+# Start a transcript when a log path is provided to capture verbose output.
 if (-not [string]::IsNullOrEmpty($logFileName))
 {
     Start-Transcript -Path $logFileName -Force
 }
 
-# Set the data source
+# Switch to the data source that hosts the target vaults.
 $ds = Get-RDMDataSource -Name $dsName
 Set-RDMCurrentDataSource $ds
 
+# Load every permission record defined in the CSV manifest.
 $CSVpermissions = Import-Csv $fileName
 
 $vaultName = ""
@@ -67,9 +92,9 @@ foreach ($CSVPerm in $CSVpermissions)
         Write-Verbose "Vault $vaultName selected..."
     }
 
-    # Select the folder. If doesn't exist, create the folder.
+    # Select the folder. Create it when it does not already exist.
     $folder = $CSVPerm.Folder
-    $levels = $folder.split('\')
+    $levels = $folder.split('\\')
     $nbLevels = $levels.Count
     $folderName = $levels[$nbLevels - 1]
     try
@@ -89,12 +114,12 @@ foreach ($CSVPerm in $CSVpermissions)
         Update-RDMUI
     }
 
-    # Set Permission
+    # Set the high-level role override as defined in the CSV.
     $session.Security.RoleOverride = $CSVPerm.RoleOverride
 
     if ($CSVPerm.RoleOverride -eq "Custom")
     {
-        # Set View Permission
+        # Configure the view override; accept canned values or expand explicit entries.
         if ($CSVPerm.ViewRoles -in "Everyone", "Default", "Never")
         {
             $session.Security.ViewOverride = $CSVPerm.ViewRoles
@@ -107,7 +132,7 @@ foreach ($CSVPerm in $CSVpermissions)
             $session.Security.ViewRoles = $viewPerm
         }
 
-        # Set all other permissions
+        # Build the remaining permission collection based on the CSV row.
         $otherPermissions = @()
         foreach($object_properties in $CSVPerm.PsObject.Properties)
         {
@@ -135,7 +160,7 @@ foreach ($CSVPerm in $CSVpermissions)
         $session.Security.Permissions = $otherPermissions
     }
 
-    # Save the modifications
+    # Persist the permission changes back to the data source.
     Set-RDMSession $session -Refresh
     Write-Verbose "Permissions updated on folder $folder..."
 }
@@ -143,6 +168,7 @@ foreach ($CSVPerm in $CSVpermissions)
 Update-RDMUI
 Write-Host "Done!!!"
 
+# Close the transcript if logging was enabled.
 if (-not [string]::IsNullOrEmpty($logFileName))
 {
     Stop-Transcript
