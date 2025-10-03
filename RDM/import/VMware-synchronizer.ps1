@@ -1,26 +1,50 @@
 #source: https://forum.devolutions.net/topics/35520/improved-vmware-synchronizer-with-powershell
-#check if RDM PS module is installed
+###########################################################################
+#
+# Synchronize VMware virtual machines into Remote Desktop Manager entries.
+#
+###########################################################################
+
+<#
+.SYNOPSIS
+    Mirror VMware virtual machines into Remote Desktop Manager sessions.
+.DESCRIPTION
+    Ensures the Devolutions.PowerShell and VMware PowerCLI modules are available, connects to the specified
+    RDM data source, and authenticates against vSphere using an existing credential entry. For each VM, the
+    script derives the group path from the vSphere folder structure, creates any missing folders in RDM, and
+    creates or updates the RDM session with properties appropriate for Windows (RDP) or non-Windows (VMRC)
+    guests. Existing sessions with mismatched types are recreated so settings stay consistent.
+.NOTES
+    Replace the placeholders for the data source name, vSphere host, and credential ID before running. The
+    script installs modules for the current user if they are missing and prompts an Out-GridView summary when
+    finished.
+#>
+
+# Ensure the Devolutions PowerShell module is installed for the current user.
 if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
     Install-Module Devolutions.PowerShell -Scope CurrentUser
 }
 
-# Adapt the data source name
+# Set the current data source (update with your environment name).
 $ds = Get-RDMDataSource -Name "NameOfYourDataSourceHere"
 Set-RDMCurrentDataSource $ds
 
 Write-Host 'Loading PowerCLI...'
 Import-Module VMware.PowerCLI
-$id = @{ID = 'your-guid-here-please'} #ID for vSphere local admin credential object
+
+# Retrieve the credential stored in RDM that will authenticate to vSphere (replace ID value first).
+$id = @{ID = 'your-guid-here-please'}
+
 Write-Host 'Connecting to vSphere...'
 $vsphere = 'your.vsphere.server.com'
 $srv = Connect-VIServer -Server $vsphere -Credential (New-Object System.Management.Automation.PSCredential((Get-RDMSessionUserName @id), (Get-RDMSessionPassword @id)))
+
 Get-VM | % {
-    # calculate expected group path based on VM folder
+    # Build the RDM group path from the VM's folder hierarchy (ignoring the root 'vm' container).
     $g = $(
         $folder = $_.Folder
         $path = $null
         while ($folder -ne $null) {
-            # root folder is 'vm', ignore it
             if ($folder.Name -cne 'vm') {
                 if ($path -eq $null) {
                     $path = $folder.Name
@@ -34,10 +58,10 @@ Get-VM | % {
                 $folder = $folder.Parent
             }
         }
-        # you can change what toplevel group to put the VMs in below
         'VMware\{0}' -f $path
     )
-    # calculate expected session type based on VM guest type ID
+
+    # Select session type based on guest OS; Windows hosts use RDP otherwise fall back to VMRC.
     if ($_.GuestId -match '^win(dows|XP|Net|Longhorn)') {
         $ct = 'RDPConfigured'
         $h = $_.Name
@@ -45,28 +69,24 @@ Get-VM | % {
         $ct = 'VMRC'
         $h = $vsphere
     }
-    # find existing session
-    # XXX: Get-RMDSession uses ValidateSet to check if the session is present in the group.
-    #      this causes a non-suppressable error message and does not assign to $s.
-    #      because of this, we have to set $s to null and even if it is working OK we will get spammed with ParameterArgumentValidationErrors.
+
+    # Locate any existing session; remove it if the connection type no longer matches.
     $s = $null
     $s = Get-RDMSession -Name $_.Name -GroupName $g -CaseSensitive -ErrorAction SilentlyContinue
     if ($s) {
         if ($s.ConnectionType.ToString() -ne $ct) {
-            # delete session of wrong type
             Remove-RDMSession -ID $s.ID
             $s = $null
         }
     }
-    # create new session if it does not exist
+
+    # Create missing folders and the new session when it does not already exist.
     if (-not $s) {
-        # create folders that do not exist
-        # XXX: probably breaks on any vm folders with backslashes in the name, if that's possible
-        $split = $g.Split('\')
+        $split = $g.Split('\\')
         $cur = New-Object System.Collections.ArrayList
         while ($cur.Count -lt $split.Count) {
             $cur.Add($split[$cur.Count]) | Out-Null
-            $curstr = $cur -join '\'
+            $curstr = $cur -join '\\'
             if (-not (Get-RDMSession -Name $cur[-1] -GroupName $curstr -ErrorAction SilentlyContinue)) {
                 Set-RDMSessionCredentials -CredentialsType Inherited -PSConnection (New-RDMSession -Name $cur[-1] -Group $curstr -Type Group) -SetSession
             }
@@ -80,15 +100,18 @@ Get-VM | % {
             $s.VMRC.VMWareConsole = 'VMWareVMRC8'
         }
     }
-    # things to update regardless of if the session was just created or if it already existed
+
+    # Update shared properties for both new and existing sessions.
     $s.Description = $_.Notes
     if ($ct -eq 'VMRC') {
         $s.VMRC.VMid = $_.Id.Remove(0, 15)
     }
     Set-RDMSession -Session $s
-    # push it down the pipe to the GridView
+
+    # Output each session for Operator review in the grid view UI.
     $s
 } | Out-GridView
+
 Update-RDMUI
 Disconnect-VIServer $srv -Force -Confirm:$false
 Pause

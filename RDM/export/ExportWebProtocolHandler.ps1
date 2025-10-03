@@ -4,26 +4,38 @@
 # can be used in a Wiki to launch the session using RDM
 #
 ###########################################################################
-#-----------------------------------[Main]-------------------------------------
-#check if RDM PS module is installed
+
+<#
+.SYNOPSIS
+    Export a CSV that maps RDM session names to launch URLs for the web protocol handler.
+.DESCRIPTION
+    Ensures the Devolutions.PowerShell module is present, connects to the specified data source, and retrieves
+    every RDP-configured session. For each entry, builds the `rdm://` URL that launches the session via the
+    web protocol handler and writes the results to a CSV for documentation or wiki usage.
+.NOTES
+    Update the data source name and output path before running. The `rdm://` URLs work only for users who can
+    reach the same data source and have the Remote Desktop Manager web protocol handler installed.
+#>
+
+# Check whether the RDM PowerShell module is available; install it for the current user if missing.
 if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
     Install-Module Devolutions.PowerShell -Scope CurrentUser
 }
 
-# Adapt the data source name
+# Set the current data source (replace with your configured data source name).
 $ds = Get-RDMDataSource -Name "NameOfYourDataSourceHere"
 Set-RDMCurrentDataSource $ds
 
-## get the data source ID, note that the "Create Web Url" button generates a different ID, but both are accepted
-$dsid = Get-RDM-DataSource | where {$_.IsCurrent -eq "X"} | select -expand "ID"
-## get the RDP sessions, create a new object with the desired fields.
-## Simply append "add-member" commands to include a new field
-$s = Get-RDM-Session | 
-    where {$_.Session.Kind -eq "RDPConfigured"} | foreach {
-        new-Object Object |
-            Add-Member NoteProperty Name $_.Name –PassThru |
-            Add-Member NoteProperty URL "rdm://open?DataSource=$dsid&Session=$($_.ID)" –PassThru 
-    }; 
+# Retrieve the identifier of the active data source (matches the value used in generated web URLs).
+$dsid = Get-RDM-DataSource | Where-Object {$_.IsCurrent -eq "X"} | Select-Object -ExpandProperty ID
 
-## save to csv, the field names are used as column headers.
-$s | export-csv c:\temp\sessions.csv -notypeinformation;
+# Collect every RDP session and project it into objects containing the display name and rdm:// launch URL.
+$sessions = Get-RDM-Session |
+    Where-Object {$_.Session.Kind -eq "RDPConfigured"} | ForEach-Object {
+        New-Object Object |
+            Add-Member NoteProperty Name $_.Name -PassThru |
+            Add-Member NoteProperty URL "rdm://open?DataSource=$dsid&Session=$($_.ID)" -PassThru
+    }
+
+# Persist the session list to CSV so it can be published or shared.
+$sessions | Export-Csv c:\temp\sessions.csv -NoTypeInformation

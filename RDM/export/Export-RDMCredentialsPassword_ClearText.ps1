@@ -4,45 +4,54 @@
 #                                                                   #
 #####################################################################
 
-<##################
-Description  : This script exports the sessions, including the passwords in clear text, from a data source to a CSV file.
-Prerequisite : The Devolutions PowerShell module must be installed on the computer.
-Version      : 1.1
-Date         : 2025-09-25
-###################>
+<#
+.SYNOPSIS
+    Export RDM sessions with usernames and passwords in clear text to a CSV file.
+.DESCRIPTION
+    Installs the Devolutions.PowerShell module if needed, switches to the specified data source, and iterates
+    through every vault to collect all sessions that are not folder-only entries. The script adds username and
+    password fields to each session and appends them to the target CSV file, producing plain text credentials.
+.NOTES
+    Update the data source name and export file path before running. The generated CSV is sensitive and should
+    be protected appropriately.
+.VERSION
+    1.1
+.LASTEDIT
+    2025-09-25
+#>
 
-#check if RDM PS module is installed
+# Ensure the Devolutions PowerShell module is available for the current user.
 if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
     Install-Module Devolutions.PowerShell -Scope CurrentUser
 }
 
-# Adapt the data source name
+# Set the current data source (replace "NameOfYourDataSourceHere" with the required data source).
 $ds = Get-RDMDataSource -Name "NameOfYourDataSourceHere"
 Set-RDMCurrentDataSource $ds
 
-#Location of the CSV file you want to export the RDM sessions to
+# Destination CSV path where the exported sessions will be stored.
 $exportFileName = "c:\Backup\RDMCredentialsData_$(get-date -f yyyy-MM-dd).csv"
 
-#Refreshes the connection to prevent errors further on
+# Refresh the RDM UI context to avoid stale data when querying sessions.
 Update-RDMUI
 
-# Retrieve all the vault and loop in them
+# Retrieve all vaults (repositories) exposed by the current data source.
 $vaults = Get-RDMVault
 
 foreach ($vault in $vaults){
-    # Change the current vault to proceed with the export
+    # Switch to the current vault so the session queries target the correct repository.
     Set-RDMCurrentRepository $vault
     Update-RDMUI
-    # Get all the sessions in the current vault
+
+    # Fetch every session except the Group placeholders; retain relevant properties.
     $RDMsessions = Get-RDMSession | Where-Object {$_.ConnectionType -ne "Group"}  | Select-Object -Property Name, ID, ConnectionType, Group, Host
 
-    #Iterate in every session
     foreach ($session in $RDMsessions){
-        # Add the username field
+        # Attach the resolved username as an additional property on the session object.
         $session | Add-Member -MemberType NoteProperty "Username" -Value (Get-RDMSessionUserName -ID $session.id)
-        # Add the password field as clear text to the session
+        # Attach the clear text password for export; highly sensitive information.
         $session | Add-Member -MemberType NoteProperty "Password" -Value (get-RDMSessionPassword -ID $session.id -AsPlainText)
-        # Export the session to a CSV file to the path configured earlier. 
+        # Append the enriched session data to the result CSV.
         $session | Export-Csv -Path $exportFileName -Append -NoTypeInformation
     }
 }
