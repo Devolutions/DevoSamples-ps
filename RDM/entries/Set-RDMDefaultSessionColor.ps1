@@ -1,27 +1,49 @@
-#source: https://forum.devolutions.net/topics/34454/changing-different-properties-on-sessions
+<#
+.SYNOPSIS
+  Adjusts default colors and images on Remote Desktop Manager (RDM) entries.
 
-#check if RDM PS module is installed
-if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
-    Install-Module Devolutions.PowerShell -Scope CurrentUser
+.DESCRIPTION
+  This script ensures the Devolutions.PowerShell module is present before exposing two helper functions:
+  - `Set-RDMDefaultSessionColor` assigns a stock color to any session or folder by updating its `ImageName` metadata.
+  - `Set-RDMImage` applies a specific built-in icon (and matching color accent) to a session for quick visual cues.
+
+  Both functions optionally switch the active data source and vault prior to updating the targeted session.
+
+.NOTES
+  - Requires the Devolutions.PowerShell module; install it first if not already registered.
+  - Original discussion: https://forum.devolutions.net/topics/34454/changing-different-properties-on-sessions
+
+.EXAMPLE
+  PS> Set-RDMDefaultSessionColor -Color Green -Session $sessionId -Vault "Production" -DataSource "Main"
+  PS> Set-RDMImage -Image "FlagGreen" -Session $sessionId -Vault "Production"
+  Updates the session color and icon for the entry identified by `$sessionId`.
+
+.LINK
+  https://powershell.devolutions.net/
+#>
+
+# Ensure the Devolutions.PowerShell module is available before invoking any RDM cmdlets.
+if (-not (Get-Module Devolutions.PowerShell -ListAvailable)) {
+    Install-Module Devolutions.PowerShell -Scope CurrentUser
 }
 
 
 function Set-RDMDefaultSessionColor {
 <#
 .SYNOPSIS
- Set the color of an entry in RDM
+ Sets the color of an RDM session or folder.
 .DESCRIPTION
- This function sets the color of a folder or session to the desired color.
+ Updates the `ImageName` to the desired stock color and persists the entry.
 .PARAMETER Color
- Specifies the color - "Black","Blue","Forest","Grey","Orange","Royal","Yellow","Purple","Black","Red","Green"
+ Specifies one of the built-in color accents: "Black","Blue","Forest","Grey","Orange","Royal","Yellow","Purple","Black","Red","Green".
 .PARAMETER Session
-Specifies the session
+ Session ID of the entry to update.
 .PARAMETER Vault
-Specifies the vault/repository that contains the session
+ Optional vault/repository name containing the session.
 .PARAMETER DataSource
-Specifies the Data Source that contains the vault/repo
+ Optional data source name containing the vault.
 .EXAMPLE
-Set-RDMFolderColor -Color "Green" -Session "ID" -vault "VaultName" -DataSource "DataSourceName"
+ Set-RDMDefaultSessionColor -Color "Green" -Session "{GUID}" -Vault "Operations" -DataSource "Prod"
 #>
     [CmdletBinding()]
     param (
@@ -41,36 +63,36 @@ Set-RDMFolderColor -Color "Green" -Session "ID" -vault "VaultName" -DataSource "
     )
     
     begin {
-        #refresh the connection to RDM to prevent errors
+        # Refresh the UI to synchronize cached data before making changes.
         Update-RDMUI
     }
-    
+
     process {
         try {
-            #set the current data source, if needed
+            # Switch data source when specified so the session lookup uses the correct repository list.
             if ($DataSource -ne ""){
                 Set-RDMCurrentDataSource "$Datasource"
                 Update-RDMUI
             }
-            #set the current repository/vault, if needed
+            # Switch the active vault when provided to target the correct session container.
             if ($Vault -ne ""){
                 Set-RDMCurrentRepository -Repository  $vault
                 Update-RDMUI
             }
-            #retreive the session, using the ID
+            # Retrieve the session by ID so we can modify its visual properties.
             $RDMsession = Get-RDMSession | Where-Object {$_.id -eq $Session}
-            #set the color
+            # Assign the stock color through the ImageName metadata.
             $RDMSession.ImageName = "["+$Color+"]"
-            #save the session back in the Data Source
+            # Persist the update back into the data source.
             Set-RDMSession -Session $RDMsession
         }
         catch {
             Write-Output $Error[0]
         }
     }
-    
+
     end {
-        #refresh the connection to RDM to prevent errors
+        # Issue a final refresh so the UI reflects the recent changes.
         Update-RDMUI
     }
 }
@@ -110,36 +132,36 @@ function Set-RDMImage {
         )
         
         begin {
-            #refresh the connection to RDM to prevent errors
+            # Refresh the UI at the beginning to maintain a valid session context.
             Update-RDMUI
         }
-        
+
         process {
             try {
-                #set the current data source, if needed
+                # Switch to the requested data source prior to fetching the session.
                 if ($DataSource -ne ""){
                     Set-RDMCurrentDataSource "$Datasource"
                     Update-RDMUI
                 }
-                #set the current repository/vault, if needed
+                # Switch to the requested vault so the session lookup hits the correct container.
                 if ($Vault -ne ""){
                     Set-RDMCurrentRepository -Repository  $vault
                     Update-RDMUI
                 }
-                #retreive the session, using the ID
+                # Retrieve the session by ID and adjust its icon.
                 $RDMsession = Get-RDMSession | Where-Object {$_.id -eq $Session}
-                #set the image - Sample is required first
+                # Apply the built-in icon; "Sample" prefix ensures RDM resolves it against internal assets.
                 $RDMSession.ImageName = "Sample$Image"
-                #save the session back in the Data Source
+                # Persist the update back into the data source.
                 Set-RDMSession -Session $RDMsession
             }
             catch {
                 Write-Output $Error[0]
             }
         }
-        
+
         end {
-            #refresh the connection to RDM to prevent errors
+            # Complete with a refresh so the UI mirrors the latest icon change.
             Update-RDMUI
         }
     }
