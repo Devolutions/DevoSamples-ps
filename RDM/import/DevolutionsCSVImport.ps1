@@ -1,53 +1,66 @@
 #source: https://forum.devolutions.net/topics/35657/bulk-import-speed-problem
-#check if RDM PS module is installed
+###########################################################################
+#
+# Import credential entries from CSV exports (e.g., Password Safe) into RDM.
+#
+###########################################################################
+
+<#
+.SYNOPSIS
+    Import credential and web entries from CSV files into Remote Desktop Manager vaults.
+.DESCRIPTION
+    Ensures the Devolutions.PowerShell module is present, sets the current data source, and loops through a
+    configured list of customers. For each customer, the script loads their CSV export, creates any missing
+    folder structure under a designated root folder, and imports each credential as either a standard
+    credential or a web entry. Passwords are applied via secure string conversion.
+.NOTES
+    Update the data source name, customer list, source folder, and credential root folder before running.
+    The CSV is expected to use semicolons and the Password Safe headers shown below.
+#>
+
+# Check whether the RDM PowerShell module is installed; install it for the current user if absent.
 if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
-    Install-Module Devolutions.PowerShell -Scope CurrentUser
+    Install-Module Devolutions.PowerShell -Scope CurrentUser
 }
 
-# Adapt the data source name
+# Set the current data source (replace with your RDM data source name).
 $ds = Get-RDMDataSource -Name "NameOfYourDataSourceHere"
 Set-RDMCurrentDataSource $ds
 
-# Declarations
+# Configure the folders that contain the customer CSVs and the destination root folder in RDM.
 $SourceFolder = 'D:\Scripts\ToImport'
 $CredentialRootFolder = "1. Credentials"
 
-
-# Define Customers Array
+# Define the customers whose CSV files will be imported.
 $Customers = @("A Test Customer1","A Test Customer2")
 
 foreach($Customer in $Customers)
 {
     $CustSrcFile = $SourceFolder + "\" + $Customer + ".csv"
-
     $RootName = ''
 
     if (!(Test-Path $CustSrcFile))
     {
-	    Write-Host "Error: No CSV for Customer $Customer found"
+        Write-Host "Error: No CSV for Customer $Customer found"
     }
     else
     {
         $Vault = Get-RDMVault -Name $Customer
-        # Fix for the Set-RDMCurrentRepository Bug
-        # Loop until the Repo is fully loaded
+        # Work around Set-RDMCurrentRepository timing issues by retrying until the vault is active.
         do
         {
-	        try
-	        {
-		        Set-RDMCurrentRepository -Repository $Vault
-	        }
-	        catch {}
-	        Start-Sleep -Seconds 1
+            try
+            {
+                Set-RDMCurrentRepository -Repository $Vault
+            }
+            catch {}
+            Start-Sleep -Seconds 1
         }
         until ((Get-RDMCurrentRepository).Name -eq $Customer)
 
         $AllFolders = Get-RDMSession -ErrorAction SilentlyContinue | where { $_.ConnectionType -eq "Group" }
 
-        # Original Header directly from Password Safe:
-        # "Ordner (Kategorie)";"Name";"UserName";"Password";"URL"
-
-        #-Header "Folder","Name","Username","Password","Url"
+        # Original Password Safe header: "Ordner (Kategorie)";"Name";"UserName";"Password";"URL"
         $Credentials = Import-csv -Path $CustSrcFile -Delimiter ";" 
 
         foreach($Credential in $Credentials)
@@ -59,9 +72,7 @@ foreach($Customer in $Customers)
             $CredURL = $Credential.URL
             $CredDomain = ""
 
-            # Since Password Safe exports the Folder Name as "Root" we
-            # need to find out which Name it is and Replace it with
-            # the new Root Folder Name
+            # Infer the root name the first time we encounter a top-level folder.
             if([string]::IsNullOrEmpty($RootName))
             {
                 if(([Regex]::Matches($CredFolder, "\\")).Count -eq 0)
@@ -71,7 +82,7 @@ foreach($Customer in $Customers)
             }
             $CredFolder = $CredFolder.replace($RootName, $CredentialRootFolder)
 
-            # Check & Create Folder Structure if Folder not existent
+            # Ensure the folder hierarchy exists prior to creating the session.
             if(([Regex]::Matches($CredFolder, "\\")).Count -gt 0)
             {
                 $ThisFolderPath = ""
@@ -86,7 +97,7 @@ foreach($Customer in $Customers)
                             $NewFolder = New-RDMSession -Name $ThisFolderName -Group $ThisFolderPath -Type "Group" -SetSession
                             Set-RDMSession -Session $NewFolder -Refresh
 
-                            # Update $AllFolders with the new Folder - safe one Get-RDMSession call
+                            # Track the new folder locally to avoid redundant Get-RDMSession calls.
                             $AllFolders += $NewFolder
                         }
                         $ThisFolderPath += "\$ThisFolderName"
@@ -98,7 +109,7 @@ foreach($Customer in $Customers)
                 }
             }
 
-            # Specify Credential Type
+            # Choose the entry type based on whether a URL is present.
             if (-not ([string]::IsNullOrEmpty($CredURL)))
             {
                 $CredType = "WebBrowser"
@@ -108,7 +119,7 @@ foreach($Customer in $Customers)
                 $CredType = "Credential"
             }
 
-            # Check if Username has Domain and set Domain Variable
+            # Split domain-qualified usernames into domain + username values.
             if(([Regex]::Matches($CredUser, "\\")).Count -gt 0)
             {
                 $CredUserSplit = $CredUser -split "\\"
@@ -117,7 +128,7 @@ foreach($Customer in $Customers)
             }
 
             $NewCred = New-RDMSession -Name $CredName -Type $CredType -Group $CredFolder -Host $CredURL
-            #$NewCred.Description = "test description"
+            #$NewCred.Description = "Optional description"
             $NewCred.Credentials.UserName = $CredUser
             $NewCred.Credentials.Domain = $CredDomain
 
