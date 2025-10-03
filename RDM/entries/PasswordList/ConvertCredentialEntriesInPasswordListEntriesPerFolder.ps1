@@ -1,32 +1,56 @@
-#Here is the PowerShell script to convert all Credential entries to a Password List entry. This will scan the whole repository and convert entries per folder.
-#check if RDM PS module is installed
+<#
+.SYNOPSIS
+  Converts all credential entries within each folder into a consolidated password list entry.
+
+.DESCRIPTION
+  This script leverages the Devolutions.PowerShell module to:
+  - Ensure Remote Desktop Manager (RDM) cmdlets are available by installing the module when needed.
+  - Target a specific data source so every operation runs against the intended repository.
+  - Enumerate all folders (group entries) and gather their credential entries.
+  - Create a password list entry per folder, populated with the credentials it previously contained.
+  - Optionally delete each original credential entry after migrating it to the password list.
+
+  Update the data source name before running the script and execute it with an account that has permission to create and delete entries.
+
+.NOTES
+  - Requires the Devolutions.PowerShell module; the script installs it for the current user if it is missing.
+  - Running the script may remove the original credential entries unless you disable the deletion line.
+
+.EXAMPLE
+  PS> .\ConvertCredentialEntriesInPasswordListEntriesPerFolder.ps1
+  Migrates every credential entry in the target data source into password list entries, one per folder.
+
+.LINK
+  https://powershell.devolutions.net/
+#>
+
+# Ensure the Devolutions.PowerShell module is available before invoking any RDM cmdlets.
 if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
-    Install-Module Devolutions.PowerShell -Scope CurrentUser
+    Install-Module Devolutions.PowerShell -Scope CurrentUser
 }
 
-# Adapt the data source name
+# Select the data source that contains the credential entries you want to migrate.
 $ds = Get-RDMDataSource -Name "NameOfYourDataSourceHere"
 Set-RDMCurrentDataSource $ds
 $groups = Get-RDMSession | where {$_.ConnectionType -eq "Group"}
 
 foreach ($group in $groups) {
-	# Get all Credential entries in the folder
+	# Gather every credential entry whose group name matches the current folder.
 	$credentials = Get-RDMSession | where {$_.Group -match $group.Name -and $_.ConnectionType -eq "Credential"}
 	
 	if ($credentials.count -gt 1) {
 		Write-Host "Processing folder" $group.Name
 		
-		# This the name of the Password List entry. Please change it to fit your needs.
-		# It will add PwdList as the prefix of the Folder name that contains the credential entries
+		# Compose the password list entry name. Adjust the prefix to match your naming standards.
 		$entryName = "PwdList_" + $group.Name
 		
-		# Creation of the Password List entry
+		# Create the password list entry in the same folder and switch its credential type accordingly.
 		$ps = New-RDMSession -Name $entryName -Type Credential -Group $group.Group
 		$ps.Credentials.CredentialType = "PasswordList"
 
 		$psArray = @()
 
-		# Add the credentials in the Password List
+		# Convert each credential entry into a password list item and stage it for the new entry.
 		foreach ($cred in $credentials) {
 			$psEntry = New-Object "Devolutions.RemoteDesktopManager.Business.PasswordListItem"
 			$psEntry.User = $cred.HostUserName
@@ -35,7 +59,7 @@ foreach ($group in $groups) {
 			$psEntry.Description = $cred.Description
 			$psArray += $psEntry
 			
-			# Comment the following line to not delete the original credential entry.
+			# Remove the original credential entry once it has been migrated; comment out to retain the source.
 			Remove-RDMSession -ID $cred.ID -Force
 		}
 
