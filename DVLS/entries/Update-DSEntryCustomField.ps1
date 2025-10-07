@@ -42,11 +42,11 @@ function Update-DSEntryCustomField ()
     
     $vault = Get-DSVault -All | where name -EQ $VaultName
     $entry = Get-DSEntry -VaultID $vault.ID -FilterMatch ExactExpression -FilterValue $EntryName
-	$entryObject = $entry.data | Convert-XMLToPSCustomObject;
+	$entryObject = $entry.data | Convert-XMLToPSCustomObject
 	
 	$metaInformation = $entryObject.Connection.MetaInformation
 	
-	$index = ($null)
+	$index = $null
 	foreach ($i in 1..5) {
 		$titleProp = 'CustomField{0}Title' -f $i
 		if ($metaInformation.$titleProp -and $metaInformation.$titleProp -eq $FieldName) { $index = $i; break }
