@@ -24,9 +24,9 @@ Import-Module Devolutions.PowerShell
 Write-Host "$ScriptName started at $(Get-Date)" -ForegroundColor Green
 
 # DVLS connection info
-$DVLSURI   = "https://mralphonso.downhill.loc/dvls"
-$AppKey    = "719e476d-6f60-4251-8a78-b76917881986"
-$AppSecret = "iJ4!L1gtfR9w4x*o4i,RtJ|QZ,%=770Oo9yzav,s+XSicc8yKMmf^0Qn/C8,*27v"
+$DVLSURI   = "YOUR DVLS URL"
+$AppKey    = "YOUR APP KEY"
+$AppSecret = "YOUR APP SECRET"
 
 # Credentials
 $secAppSecret = ConvertTo-SecureString $AppSecret -AsPlainText -Force
@@ -191,3 +191,4 @@ function Export-DSFolderPermissionsInteractive {
 
 # Run the interactive export
 Export-DSFolderPermissionsInteractive
+
