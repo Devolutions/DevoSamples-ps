@@ -10,7 +10,7 @@
   replacing principal IDs with user/role display names.
 .NOTES
   Version:        1.0
-  Author:         William Alphonso11
+  Author:         William Alphonso
   Creation Date: 03-12-2025
 #>
 
