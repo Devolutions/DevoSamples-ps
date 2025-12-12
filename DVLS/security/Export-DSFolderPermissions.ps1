@@ -55,8 +55,19 @@ function Export-DSFolderPermissions ()
                     $IDs = ($csvFile.Principals).Split(",")
                     foreach ($ID in $IDs)
                     {
-                        $group = Get-DSRole -RoleID $ID -ErrorAction Ignore
-                        $user = Get-DSUser -UserID $ID -ErrorAction Ignore
+                        try {
+                            $group = Get-DSRole -RoleID $guid -ErrorAction Stop
+                        }
+                        catch {
+                            $group = $null
+                        }
+
+                        try {
+                            $user  = Get-DSUser -UserID $guid -ErrorAction Stop
+                        }
+                        catch {
+                            $user = $null
+                        }
 
                         if (-not [string]::IsNullOrEmpty($Principals))
                         {
@@ -78,6 +89,7 @@ function Export-DSFolderPermissions ()
                 $csvFile | Export-Csv $fileName -Append
             }
         }
+        Write-Host "Vault's file $filename exported"
     }
 
     Close-DSSession 
