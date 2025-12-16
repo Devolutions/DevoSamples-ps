@@ -5,9 +5,8 @@ Update a username-password credential entry's password.
 .DESCRIPTION
 Provides Update-DSCredentialPassword, which:
 - Locates a vault by name and a username-password credential entry by name match.
-- Loads the entry XML into a PowerShell object.
-- Sets the clear-text Password on a typed CredentialsConnection so that SafePassword is recalculated.
-- Writes the recalculated SafePassword back to the entry and saves the entry.
+- Sets the password on the credential entry using Set-DSEntryProperty.
+- Saves the updated entry.
 
 .PARAMETER VaultName
 Name of the vault that contains the credential entry.
@@ -32,16 +31,11 @@ function Update-DSCredentialPassword ()
         [Parameter(Mandatory)][string]$CredentialName,
         [Parameter(Mandatory)][string]$Password
     )
-    
+
     $vault = Get-DSVault -All | where name -EQ $VaultName
     $entry = Get-DSEntry -VaultID $vault.ID -FilterMatch ExactExpression -FilterValue $CredentialName
-    
-	$credObject = $entry.data | Convert-XMLToPSCustomObject
-	$credConnection = [Devolutions.RemoteDesktopManager.Business.CredentialsConnection]$credObject.Connection.Credentials
-	$credConnection.Password = $Password
-	$credObject.Connection.Credentials.SafePassword = $credConnection.SafePassword
-	
-	$newCredXml = $credObject | Convert-PSCustomObjectToXML
-	$entry.Data = $newCredXml.OuterXml
-	Update-DSEntryBase -FromRDMConnection $entry
+
+	$entry.ConnectionInfo |
+		Set-DSEntryProperty -Path "Credentials" -PropertyName "Password" -PropertyValue $Password |
+		Update-DSEntryBase
 }
