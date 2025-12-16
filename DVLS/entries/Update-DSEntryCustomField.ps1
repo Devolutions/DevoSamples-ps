@@ -69,38 +69,37 @@ function Update-DSEntryCustomField ()
     }
 	
 	if ($index) {
-        $plainProp = 'CustomField{0}Value' -f $index
-        $hiddenProp = 'CustomField{0}Hidden' -f $index
-        $sensitiveProp = 'SafeCustomField{0}ValueSensitive' -f $index
 
         if ($Sensitive) {
-            Remove-Property $metaInformation $plainProp
-            Ensure-NoteProperty $metaInformation $hiddenProp "true"
-            $filtered = [Devolutions.RemoteDesktopManager.Business.ConnectionMetaInformation]::FilterCustomFieldValueSensitive($NewValue)
-            Ensure-NoteProperty $metaInformation $sensitiveProp $filtered
-        }
-        else {
-            Remove-Property $metaInformation $sensitiveProp
-            Remove-Property $metaInformation $hiddenProp
-            Ensure-NoteProperty $metaInformation $plainProp $NewValue
-        }
+			$entry.ConnectionInfo |
+				Set-DSEntryProperty -Path "MetaInformation" -PropertyName "CustomField${index}Hidden" -PropertyValue $true |
+				Set-DSEntryProperty -Path "MetaInformation" -PropertyName "CustomField${index}ValueSensitive" -PropertyValue $NewValue |
+				Update-DSEntryBase
+		}
+		else {
+			$entry.ConnectionInfo |
+				Set-DSEntryProperty -Path "MetaInformation" -PropertyName "CustomField${index}Hidden" -PropertyValue $false |
+				Set-DSEntryProperty -Path "MetaInformation" -PropertyName "CustomField${index}Value" -PropertyValue $NewValue |
+				Update-DSEntryBase
+		}
+        
+        return
+    }
+
+    $e = $entityMatch
+
+    if ($Sensitive) {
+        Remove-Property $e 'CustomFieldValue'
+        Ensure-NoteProperty $e 'CustomFieldHidden' "true"
+        Ensure-NoteProperty $e 'CustomFieldType' 'Hidden'
+        $filtered = [Devolutions.RemoteDesktopManager.Business.ConnectionMetaInformation]::FilterCustomFieldValueSensitive($NewValue)
+        Ensure-NoteProperty $e 'SafeCustomFieldValueSensitive' $filtered
     }
     else {
-        $e = $entityMatch
-
-        if ($Sensitive) {
-            Remove-Property $e 'CustomFieldValue'
-            Ensure-NoteProperty $e 'CustomFieldHidden' "true"
-            Ensure-NoteProperty $e 'CustomFieldType' 'Hidden'
-            $filtered = [Devolutions.RemoteDesktopManager.Business.ConnectionMetaInformation]::FilterCustomFieldValueSensitive($NewValue)
-            Ensure-NoteProperty $e 'SafeCustomFieldValueSensitive' $filtered
-        }
-        else {
-            Remove-Property $e 'SafeCustomFieldValueSensitive'
-            Remove-Property $e 'CustomFieldHidden'
-            Remove-Property $e 'CustomFieldType'
-            Ensure-NoteProperty $e 'CustomFieldValue' $NewValue
-        }
+        Remove-Property $e 'SafeCustomFieldValueSensitive'
+        Remove-Property $e 'CustomFieldHidden'
+        Remove-Property $e 'CustomFieldType'
+        Ensure-NoteProperty $e 'CustomFieldValue' $NewValue
     }
 	
 	$entryObject.Connection.MetaInformation = $metaInformation
