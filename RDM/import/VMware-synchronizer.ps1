@@ -26,20 +26,34 @@ if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
 }
 
 # Set the current data source (update with your environment name).
-$ds = Get-RDMDataSource -Name "NameOfYourDataSourceHere"
+$ds = Get-RDMDataSource -Name "<Data source name>"
 Set-RDMCurrentDataSource $ds
 
+$vault = Get-RDMRepository | Where-Object { $_.Name -eq "<Repository name>" }
+Set-RDMCurrentRepository $vault
+
 Write-Host 'Loading PowerCLI...'
-Import-Module VMware.PowerCLI
+# Install/load the VCF-branded PowerCLI module (supersedes VMware.PowerCLI).
+if (-not (Get-Module VCF.PowerCLI -ListAvailable)) {
+    Install-Module VCF.PowerCLI -Scope CurrentUser -AllowClobber -SkipPublisherCheck -Force
+}
+Import-Module VCF.PowerCLI -Force
+# Ignore self-signed/invalid certs and opt out of CEIP for unattended use.
+Set-PowerCLIConfiguration -InvalidCertificateAction Ignore -ParticipateInCeip:$false -Confirm:$false | Out-Null
 
 # Retrieve the credential stored in RDM that will authenticate to vSphere (replace ID value first).
-$id = @{ID = 'your-guid-here-please'}
+$id = @{ID = '<Credential entry ID>'}
 
 Write-Host 'Connecting to vSphere...'
-$vsphere = 'your.vsphere.server.com'
-$srv = Connect-VIServer -Server $vsphere -Credential (New-Object System.Management.Automation.PSCredential((Get-RDMSessionUserName @id), (Get-RDMSessionPassword @id)))
+$vsphere = '<vSphere server hostname or IP>'
+$srv = $null
+try {
+    $srv = Connect-VIServer -Server $vsphere -Credential (New-Object System.Management.Automation.PSCredential((Get-RDMSessionUserName @id), (Get-RDMSessionPassword @id))) -ErrorAction Stop
+} catch {
+    throw "Connect-VIServer failed: $($_.Exception.Message)"
+}
 
-Get-VM | % {
+Get-VM -Server $srv | % {
     # Build the RDM group path from the VM's folder hierarchy (ignoring the root 'vm' container).
     $g = $(
         $folder = $_.Folder
@@ -113,5 +127,6 @@ Get-VM | % {
 } | Out-GridView
 
 Update-RDMUI
-Disconnect-VIServer $srv -Force -Confirm:$false
-Pause
+if ($srv) {
+    Disconnect-VIServer $srv -Force -Confirm:$false
+}

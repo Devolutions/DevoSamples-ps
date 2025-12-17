@@ -17,21 +17,14 @@
     reach the same data source and have the Remote Desktop Manager web protocol handler installed.
 #>
 
-# Check whether the RDM PowerShell module is available; install it for the current user if missing.
-if(-not (Get-Module Devolutions.PowerShell -ListAvailable)){
-    Install-Module Devolutions.PowerShell -Scope CurrentUser
-}
-
 # Set the current data source (replace with your configured data source name).
-$ds = Get-RDMDataSource -Name "NameOfYourDataSourceHere"
+$ds = Get-RDMDataSource -Name "<data source name>"
 Set-RDMCurrentDataSource $ds
-
-# Retrieve the identifier of the active data source (matches the value used in generated web URLs).
-$dsid = Get-RDM-DataSource | Where-Object {$_.IsCurrent -eq "X"} | Select-Object -ExpandProperty ID
+$dsid = $ds.Id
 
 # Collect every RDP session and project it into objects containing the display name and rdm:// launch URL.
-$sessions = Get-RDM-Session |
-    Where-Object {$_.Session.Kind -eq "RDPConfigured"} | ForEach-Object {
+$sessions = Get-RDMSession | Where-Object { $_.ConnectionType -eq "RDPConfigured" }
+ ForEach-Object {
         New-Object Object |
             Add-Member NoteProperty Name $_.Name -PassThru |
             Add-Member NoteProperty URL "rdm://open?DataSource=$dsid&Session=$($_.ID)" -PassThru
