@@ -41,7 +41,15 @@ function Update-DSEntryCustomField ()
     }
     
     $vault = Get-DSVault -All | where name -EQ $VaultName
+    if (-not $vault) {
+        throw "Vault '$VaultName' not found."
+    }
+
     $entry = Get-DSEntry -VaultID $vault.ID -FilterMatch ExactExpression -FilterValue $EntryName
+    if (-not $entry) {
+        throw "Entry '$EntryName' not found in vault '$VaultName'."
+    }
+
 	$entryObject = $entry.data | Convert-XMLToPSCustomObject
 	
 	$metaInformation = $entryObject.Connection.MetaInformation
@@ -71,35 +79,33 @@ function Update-DSEntryCustomField ()
 	if ($index) {
 
         if ($Sensitive) {
-			$entry.ConnectionInfo |
+			$entry |
 				Set-DSEntryProperty -Path "MetaInformation" -PropertyName "CustomField${index}Hidden" -PropertyValue $true |
 				Set-DSEntryProperty -Path "MetaInformation" -PropertyName "CustomField${index}ValueSensitive" -PropertyValue $NewValue |
 				Update-DSEntryBase
 		}
 		else {
-			$entry.ConnectionInfo |
+			$entry |
 				Set-DSEntryProperty -Path "MetaInformation" -PropertyName "CustomField${index}Hidden" -PropertyValue $false |
 				Set-DSEntryProperty -Path "MetaInformation" -PropertyName "CustomField${index}Value" -PropertyValue $NewValue |
 				Update-DSEntryBase
 		}
-        
+
         return
     }
 
-    $e = $entityMatch
-
     if ($Sensitive) {
-        Remove-Property $e 'CustomFieldValue'
-        Ensure-NoteProperty $e 'CustomFieldHidden' "true"
-        Ensure-NoteProperty $e 'CustomFieldType' 'Hidden'
+        Remove-Property $entityMatch 'CustomFieldValue'
+        Ensure-NoteProperty $entityMatch 'CustomFieldHidden' "true"
+        Ensure-NoteProperty $entityMatch 'CustomFieldType' 'Hidden'
         $filtered = [Devolutions.RemoteDesktopManager.Business.ConnectionMetaInformation]::FilterCustomFieldValueSensitive($NewValue)
-        Ensure-NoteProperty $e 'SafeCustomFieldValueSensitive' $filtered
+        Ensure-NoteProperty $entityMatch 'SafeCustomFieldValueSensitive' $filtered
     }
     else {
-        Remove-Property $e 'SafeCustomFieldValueSensitive'
-        Remove-Property $e 'CustomFieldHidden'
-        Remove-Property $e 'CustomFieldType'
-        Ensure-NoteProperty $e 'CustomFieldValue' $NewValue
+        Remove-Property $entityMatch 'SafeCustomFieldValueSensitive'
+        Remove-Property $entityMatch 'CustomFieldHidden'
+        Remove-Property $entityMatch 'CustomFieldType'
+        Ensure-NoteProperty $entityMatch 'CustomFieldValue' $NewValue
     }
 	
 	$entryObject.Connection.MetaInformation = $metaInformation
