@@ -45,7 +45,7 @@ function Update-DSEntryCustomField ()
         throw "Vault '$VaultName' not found."
     }
 
-    $entry = Get-DSEntry -VaultID $vault.ID -FilterMatch ExactExpression -FilterValue $EntryName
+    $entry = Get-DSEntry -VaultID $vault.ID -FilterMatch ExactExpression -FilterValue $EntryName | Select-Object -First 1
     if (-not $entry) {
         throw "Entry '$EntryName' not found in vault '$VaultName'."
     }
