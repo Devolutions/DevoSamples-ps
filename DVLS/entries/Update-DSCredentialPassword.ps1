@@ -37,10 +37,17 @@ function Update-DSCredentialPassword ()
         throw "Vault '$VaultName' not found."
     }
 
-    $entry = Get-DSEntry -VaultID $vault.ID -FilterMatch ExactExpression -FilterValue $CredentialName | Select-Object -First 1
-    if (-not $entry) {
+    $entries = @(Get-DSEntry -VaultID $vault.ID -FilterMatch ExactExpression -FilterValue $CredentialName)
+    
+    if (-not $entries) {
         throw "Entry '$CredentialName' not found in vault '$VaultName'."
     }
+
+    if ($entries.Count -gt 1) {
+        throw "Multiple entries matching '$CredentialName' found in vault '$VaultName'. Expected exactly one entry."
+    }
+
+    $entry = $entries | Select-Object -First 1
 
 	$entry | Set-DSEntryProperty -Path "Credentials" -PropertyName "Password" -PropertyValue $Password | Update-DSEntryBase
 }
