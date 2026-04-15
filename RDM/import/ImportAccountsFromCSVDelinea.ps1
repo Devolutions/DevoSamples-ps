@@ -10,15 +10,17 @@
     Import credential entries from a Delinea generated CSV file
 .DESCRIPTION
     Ensures the Devolutions.PowerShell is available, connects to the specified
-    RDM data source, and import credential entries following the Folder. This scripot should detect when a line is 
+    RDM data source, and import credential entries following the Folder. This script should detect when a line is 
     a new entry or a continuation
 .NOTES
     Replace the placeholders for the data source name, vault name, csv path. The
     script installs modules for the current user if they are missing and prompts an Out-GridView summary when
     finished.
+    Require Remote Desktop Manager installed and configured to connect to DVLS.
+    While calling the script, you will be prompted for a [string]$DataSourceName, [string]$VaultName, [string]$csvFilePath, and [string]$logFilePath = ""
+    
 #>
 
-# playbook
 ## read the csv file
 ## for each rows, verify if:
 ## - SecretName is not empty
