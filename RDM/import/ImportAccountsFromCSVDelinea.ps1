@@ -65,7 +65,7 @@ function Import-EntriesFromDelineaCsv {
     )
     
     # read and Import the csv File
-    $Records = Import-Csv -Path $csvPath
+    $Records = Import-Csv -LiteralPath $csvPath
     # variable to ensure we have everything to save the entry
    
     # init migration
