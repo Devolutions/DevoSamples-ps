@@ -1,0 +1,474 @@
+<#
+.SYNOPSIS
+    Sets the Contributor vault role for specific Devolutions Hub groups.
+
+.DESCRIPTION
+    This script assigns a predefined Hub vault role to one or more Hub groups by exact group name.
+
+    It is designed for Devolutions Hub vault permissions, not entry permissions.
+
+    The script handles both cases:
+      - If a group already has an explicit vault permission, it updates it.
+      - If a group does not have an explicit vault permission, it creates it.
+
+    The script validates the final permission after each change and fails if the expected RoleId
+    is not returned by Get-HubVaultPermission.
+
+.PARAMETER VaultId
+    The Devolutions Hub vault ID where the permission must be applied.
+
+.PARAMETER GroupNames
+    One or more Hub group names to modify. Matching is exact by default, but case-insensitive.
+
+.PARAMETER VaultRoleId
+    The Hub vault role ID to apply. Defaults to the Contributor role ID provided by the user.
+
+.PARAMETER HubUrl
+    The Hub URL. Used only when ApplicationKey and ApplicationSecret are supplied.
+
+.PARAMETER ApplicationKey
+    Optional Hub application key. If omitted, the script uses the current Hub context.
+
+.PARAMETER ApplicationSecret
+    Optional Hub application secret as a SecureString. If omitted, the script uses the current Hub context.
+
+.PARAMETER CaseSensitive
+    Uses case-sensitive group name matching.
+
+.EXAMPLE
+    .\Set-HubVaultGroupContributor.ps1 -WhatIf -Verbose
+
+    Performs a dry run showing what would be changed.
+
+.EXAMPLE
+    .\Set-HubVaultGroupContributor.ps1 -Verbose
+
+    Sets the Contributor vault role for the default groups: test and pat.
+
+.EXAMPLE
+    .\Set-HubVaultGroupContributor.ps1 -GroupNames @('test', 'pat') -Verbose
+
+    Sets the Contributor vault role for the specified group names.
+
+.EXAMPLE
+    $secret = Read-Host "Application secret" -AsSecureString
+
+    .\Set-HubVaultGroupContributor.ps1 `
+        -ApplicationKey "YOUR_APPLICATION_KEY" `
+        -ApplicationSecret $secret `
+        -Verbose
+
+    Connects to Hub using application credentials, then applies the permission.
+
+.NOTES
+    VaultRoleId                          VaultRoleName
+    -----------                          -------------
+    e8435181-b199-42a2-b904-b2878be6752d gbVaultOwners
+    c750b79e-e268-4fa9-969e-7d93074cb193 lblPermissionRoleContributors
+    b0bdee14-7c9c-4973-a6f3-8650827d0296 lblPermissionRoleOperators
+    84a41a20-9e01-45b6-9e11-dc39ab03b25a lblPermissionRolePrivilegedOperators
+    efe8a730-ab0b-48f2-9e5b-bdc2f9e2b594 lblPermissionRolePrivilegedReaders
+    0192caae-e22e-4d1a-bfe8-9c6bcbee07ea lblPermissionRoleReaders
+    15f55269-2239-4a42-8caa-1daa20e97bb2 lblPermissionRoleRestricted
+#>
+
+# Change the VaultID and Group Name to the desired value.
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'Medium')]
+[OutputType([pscustomobject])]
+param(
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [guid]$VaultId = '<VaultID>',
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string[]]$GroupNames = @(
+        '<GroupNameA>',
+        '<GroupNameB>'
+    ),
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [guid]$VaultRoleId = 'c750b79e-e268-4fa9-969e-7d93074cb193',
+
+    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
+    [string]$HubUrl = '<Hub URL>',
+
+    [Parameter(Mandatory = $false)]
+    [string]$ApplicationKey,
+
+    [Parameter(Mandatory = $false)]
+    [securestring]$ApplicationSecret,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$CaseSensitive
+)
+
+begin {
+    Set-StrictMode -Version Latest
+    $ErrorActionPreference = 'Stop'
+
+    function ConvertFrom-SecureStringToPlainText {
+        <#
+        .SYNOPSIS
+            Converts a SecureString to plain text for cmdlets that require a string secret.
+
+        .DESCRIPTION
+            Connect-HubAccount expects ApplicationSecret as a string.
+            This helper minimizes unmanaged memory exposure by clearing the BSTR after conversion.
+        #>
+
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory)]
+            [securestring]$SecureString
+        )
+
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
+
+        try {
+            [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        }
+        finally {
+            if ($bstr -ne [IntPtr]::Zero) {
+                [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+            }
+        }
+    }
+
+    function Get-FirstPropertyValue {
+        <#
+        .SYNOPSIS
+            Returns the first available property value from a list of possible property names.
+
+        .DESCRIPTION
+            The Devolutions.PowerShell objects may expose IDs and names with slightly different
+            property names depending on module version or object type. This helper keeps the
+            script resilient.
+        #>
+
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory)]
+            [object]$InputObject,
+
+            [Parameter(Mandatory)]
+            [string[]]$PropertyNames
+        )
+
+        foreach ($propertyName in $PropertyNames) {
+            $property = $InputObject.PSObject.Properties[$propertyName]
+
+            if ($null -ne $property -and $null -ne $property.Value) {
+                return $property.Value
+            }
+        }
+
+        return $null
+    }
+
+    function Test-HubVaultPermissionIsExplicit {
+        <#
+        .SYNOPSIS
+            Determines whether a Hub vault permission object represents an explicit permission.
+
+        .DESCRIPTION
+            In this environment, Get-HubVaultPermission can return a default object with:
+              - RoleId = $null
+              - all permission flags = $false
+
+            That object does not represent a real explicit vault permission assignment.
+            This helper prevents calling Set-HubVaultPermission against a non-existing ACL row.
+        #>
+
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory = $false)]
+            [object]$Permission
+        )
+
+        if ($null -eq $Permission) {
+            return $false
+        }
+
+        $roleIdProperty = $Permission.PSObject.Properties['RoleId']
+
+        if ($null -ne $roleIdProperty -and $null -ne $roleIdProperty.Value) {
+            return $true
+        }
+
+        $booleanPermissionProperties = @(
+            'AddEntries',
+            'ClearHistory',
+            'DeleteEntries',
+            'EditEntries',
+            'ExecuteEntries',
+            'ExportEntries',
+            'ManageAttachments',
+            'ManageDocumentation',
+            'ManageVault',
+            'RestoreEntries',
+            'TemporaryAccessApprover',
+            'ViewActivityLogs',
+            'ViewDeletedEntries',
+            'ViewEntryHistory',
+            'ViewEntryLogs',
+            'ViewPassword',
+            'ViewSensitive',
+            'ViewPasswordHistory',
+            'ViewSensitiveHistory',
+            'ViewVault',
+            'ViewEntries',
+            'ForceCheckin',
+            'ApproveCheckout',
+            'ViewRecordings',
+            'EditVPNSSHGatewayConfiguration',
+            'EditSessionRecordingConfiguration'
+        )
+
+        foreach ($propertyName in $booleanPermissionProperties) {
+            $property = $Permission.PSObject.Properties[$propertyName]
+
+            if ($null -ne $property -and $property.Value -eq $true) {
+                return $true
+            }
+        }
+
+        return $false
+    }
+
+    function Find-HubGroupByExactName {
+        <#
+        .SYNOPSIS
+            Finds one Hub group by exact group name.
+
+        .DESCRIPTION
+            Throws if no group is found.
+            Throws if more than one group matches the requested name.
+        #>
+
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory)]
+            [object[]]$Groups,
+
+            [Parameter(Mandatory)]
+            [string]$Name,
+
+            [Parameter(Mandatory)]
+            [bool]$UseCaseSensitiveMatch
+        )
+
+        $matches = @(
+            $Groups | Where-Object {
+                $currentName = Get-FirstPropertyValue -InputObject $_ -PropertyNames @(
+                    'Name',
+                    'GroupName',
+                    'DisplayName'
+                )
+
+                if ($UseCaseSensitiveMatch) {
+                    $currentName -ceq $Name
+                }
+                else {
+                    $currentName -eq $Name
+                }
+            }
+        )
+
+        if ($matches.Count -eq 0) {
+            throw "Group not found by exact name: '$Name'."
+        }
+
+        if ($matches.Count -gt 1) {
+            throw "Multiple groups matched the name '$Name'. Use a unique group name or adapt the script to target GroupId directly."
+        }
+
+        return $matches[0]
+    }
+
+    function Assert-HubVaultPermissionRole {
+        <#
+        .SYNOPSIS
+            Validates that a group has the expected Hub vault role.
+
+        .DESCRIPTION
+            Throws if the returned permission does not contain the expected RoleId.
+        #>
+
+        [CmdletBinding()]
+        param(
+            [Parameter(Mandatory)]
+            [object]$Permission,
+
+            [Parameter(Mandatory)]
+            [guid]$ExpectedRoleId,
+
+            [Parameter(Mandatory)]
+            [string]$GroupName
+        )
+
+        if ($null -eq $Permission) {
+            throw "Validation failed for group '$GroupName'. No permission object was returned."
+        }
+
+        $roleIdProperty = $Permission.PSObject.Properties['RoleId']
+
+        if ($null -eq $roleIdProperty -or $null -eq $roleIdProperty.Value) {
+            throw "Validation failed for group '$GroupName'. RoleId is still null."
+        }
+
+        $actualRoleId = [guid]$roleIdProperty.Value
+
+        if ($actualRoleId -ne $ExpectedRoleId) {
+            throw "Validation failed for group '$GroupName'. Expected RoleId '$ExpectedRoleId' but got '$actualRoleId'."
+        }
+    }
+}
+
+process {
+    Write-Verbose 'Importing Devolutions.PowerShell module.'
+    Import-Module Devolutions.PowerShell -ErrorAction Stop
+
+    if ($ApplicationKey -and $ApplicationSecret) {
+        Write-Verbose "Connecting to Hub using application credentials: $HubUrl"
+
+        $plainSecret = ConvertFrom-SecureStringToPlainText -SecureString $ApplicationSecret
+
+        Connect-HubAccount `
+            -Url $HubUrl `
+            -ApplicationKey $ApplicationKey `
+            -ApplicationSecret $plainSecret
+    }
+    else {
+        Write-Verbose 'No application credentials supplied. Using the current Hub context.'
+        $null = Get-HubContext
+    }
+
+    Write-Verbose "Target vault ID: $VaultId"
+    Write-Verbose "Target vault role ID: $VaultRoleId"
+
+    $groups = @(Get-HubGroup)
+
+    if ($groups.Count -eq 0) {
+        throw 'No Hub groups were returned by Get-HubGroup.'
+    }
+
+    $results = foreach ($groupName in $GroupNames) {
+        Write-Verbose "Resolving Hub group: $groupName"
+
+        $group = Find-HubGroupByExactName `
+            -Groups $groups `
+            -Name $groupName `
+            -UseCaseSensitiveMatch ([bool]$CaseSensitive)
+
+        $resolvedGroupName = Get-FirstPropertyValue -InputObject $group -PropertyNames @(
+            'Name',
+            'GroupName',
+            'DisplayName'
+        )
+
+        $groupId = [guid](Get-FirstPropertyValue -InputObject $group -PropertyNames @(
+            'Id',
+            'ID',
+            'GroupId',
+            'GroupID'
+        ))
+
+        Write-Verbose "Resolved group '$resolvedGroupName' to ID '$groupId'."
+
+        $beforePermission = $null
+
+        try {
+            $beforePermission = Get-HubVaultPermission `
+                -VaultId $VaultId `
+                -GroupId $groupId
+        }
+        catch {
+            Write-Verbose "No permission object returned for '$resolvedGroupName'. Error: $($_.Exception.Message)"
+            $beforePermission = $null
+        }
+
+        $hasExplicitPermission = Test-HubVaultPermissionIsExplicit -Permission $beforePermission
+
+        $operation = if ($hasExplicitPermission) {
+            'Update existing Hub vault group permission'
+        }
+        else {
+            'Create new Hub vault group permission'
+        }
+
+        $target = "Group '$resolvedGroupName' [$groupId] on vault '$VaultId'"
+
+        if ($PSCmdlet.ShouldProcess($target, $operation)) {
+            $warningMessages = @()
+
+            if ($hasExplicitPermission) {
+                Write-Verbose "Updating existing vault permission for '$resolvedGroupName'."
+
+                Set-HubVaultPermission `
+                    -VaultId $VaultId `
+                    -GroupId $groupId `
+                    -VaultRoleId $VaultRoleId `
+                    -WarningVariable warningMessages `
+                    -WarningAction Continue
+
+                $action = 'Updated'
+            }
+            else {
+                Write-Verbose "Creating new vault permission for '$resolvedGroupName'."
+
+                New-HubVaultPermission `
+                    -VaultId $VaultId `
+                    -GroupId $groupId `
+                    -VaultRoleId $VaultRoleId `
+                    -WarningVariable warningMessages `
+                    -WarningAction Continue
+
+                $action = 'Created'
+            }
+
+            $afterPermission = Get-HubVaultPermission `
+                -VaultId $VaultId `
+                -GroupId $groupId
+
+            Assert-HubVaultPermissionRole `
+                -Permission $afterPermission `
+                -ExpectedRoleId $VaultRoleId `
+                -GroupName $resolvedGroupName
+
+            [pscustomobject]@{
+                VaultId             = $VaultId
+                GroupName           = $resolvedGroupName
+                GroupId             = $groupId
+                Action              = $action
+                RoleId              = [guid]$afterPermission.RoleId
+                AddEntries          = $afterPermission.AddEntries
+                DeleteEntries       = $afterPermission.DeleteEntries
+                EditEntries         = $afterPermission.EditEntries
+                ExecuteEntries      = $afterPermission.ExecuteEntries
+                ViewVault           = $afterPermission.ViewVault
+                ViewEntries         = $afterPermission.ViewEntries
+                ViewPassword        = $afterPermission.ViewPassword
+                ViewSensitive       = $afterPermission.ViewSensitive
+                WarningMessages     = ($warningMessages -join ' | ')
+                ValidationSucceeded = $true
+            }
+        }
+    }
+
+    $results | Format-Table `
+        GroupName,
+        GroupId,
+        Action,
+        RoleId,
+        ViewVault,
+        ViewEntries,
+        AddEntries,
+        EditEntries,
+        DeleteEntries `
+        -AutoSize
+
+    $results
+}
