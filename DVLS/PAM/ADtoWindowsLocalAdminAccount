@@ -1,0 +1,161 @@
+<#
+.SYNOPSIS
+Discover Windows computers from Active Directory and ensure a matching DVLS PAM provider
+and scan configuration exists for each host.
+ 
+.DESCRIPTION
+The script connects to Active Directory to enumerate computers, then authenticates to
+Devolutions Server using an application identity. For every AD computer that is returned,
+it creates (or reuses) a Windows Local Computer PAM provider in DVLS, adjusts the provider
+settings (credential type and host name), and ensures a scan configuration exists.
+Existing providers are skipped so the script can be re-run safely to onboard new machines.
+The DVLS connection information is read from environment variables (DS_URL, DS_USER, DS_PASSWORD);
+replace these with secure secret-store lookups before using the script in production.
+ 
+.PARAMETER ADDomain
+Optional domain controller or DNS domain name to query. Defaults to discovering the current domain.
+ 
+.PARAMETER ADSearchBase
+Optional distinguished name used to scope the computer search (e.g. "OU=Servers,DC=corp,DC=local").
+If omitted, the domain DN (or OU if provided) is used automatically.
+ 
+.PARAMETER ADOrganizationalUnit
+Optional OU name (simple or distinguished) to build the search base when ADSearchBase is not supplied.
+ 
+.PARAMETER IncludeServers
+Include Windows Server operating systems (default: $true).
+ 
+.PARAMETER IncludeWorkstations
+Include Windows client operating systems (default: $true).
+ 
+.PARAMETER IncludeDisabled
+Include disabled computer accounts. By default only enabled computers are returned.
+ 
+.PARAMETER Properties
+Additional AD attributes to retrieve. Defaults to a useful set for inventory scenarios.
+ 
+.EXAMPLE
+PS> .\WindowsLocalComputer.ps1 -ADDomain corp.local -ADOrganizationalUnit "OU=Servers"
+ 
+Enumerates AD computers under OU=Servers, creates Windows Local Computer PAM providers when
+needed, and creates scan configurations that run immediately.
+#>
+ 
+[CmdletBinding()]
+param(
+    [string]$ADDomain,
+    [string]$ADSearchBase,
+    [string]$ADOrganizationalUnit,
+    [bool]$IncludeServers = $true,
+    [bool]$IncludeWorkstations = $true,
+    [switch]$IncludeDisabled,
+    [string[]]$Properties = @('Name','DNSHostName','OperatingSystem','Enabled','LastLogonDate')
+)
+# Ensure Devolutions PowerShell module is loaded
+Import-Module Devolutions.PowerShell
+ 
+# Connect to DVLS
+# NOTE: Replace these environment variables with your secure secret-store references in production.
+$env:DS_URL= "<DVLS URL>"
+$env:DS_USER = "<App Key>"
+$env:DS_PASSWORD = '<App Secret>'
+ 
+ 
+[string]$Username = $env:DS_USER
+[string]$Password = $env:DS_PASSWORD
+[string]$DVLSUrl = $env:DS_URL
+ 
+[securestring]$SecPassword = ConvertTo-SecureString $Password -AsPlainText -Force
+[pscredential]$Creds = New-Object System.Management.Automation.PSCredential ($Username, $SecPassword)
+ 
+$Response = New-DSSession -Credential $Creds -BaseURI $DVLSUrl -AsApplication
+$response
+    
+Write-Host "Connecting to Devolutions Server at $DVLSUrl ..." -ForegroundColor Cyan
+ 
+try {
+    # Ensure the AD module is present before attempting discovery
+    Import-Module ActiveDirectory
+ 
+    # Resolve AD server context and search scope based on the provided parameters
+    $domainInfo = if ($ADDomain) {
+        Get-ADDomain -Server $ADDomain -ErrorAction Stop
+    } else {
+        Get-ADDomain -ErrorAction Stop
+    }
+    $adServer = if ($ADDomain) { $ADDomain } else { $domainInfo.DNSRoot }
+ 
+    if (-not $ADSearchBase) {
+        if ($ADOrganizationalUnit) {
+            if ($ADOrganizationalUnit -match 'DC=') {
+                $ADSearchBase = $ADOrganizationalUnit
+            } elseif ($ADOrganizationalUnit -match '^OU=') {
+                $ADSearchBase = "$ADOrganizationalUnit,$($domainInfo.DistinguishedName)"
+            } else {
+                $ADSearchBase = "OU=$ADOrganizationalUnit,$($domainInfo.DistinguishedName)"
+            }
+        } else {
+            $ADSearchBase = $domainInfo.DistinguishedName
+        }
+    }
+ 
+    $queryProps = @('OperatingSystem','Enabled','DNSHostName') + $Properties | Select-Object -Unique
+    $ldapFilter = '(objectClass=computer)'
+    $computers = Get-ADComputer -Server $adServer -SearchBase $ADSearchBase -LDAPFilter $ldapFilter -Properties $queryProps -ErrorAction Stop
+ 
+    if (-not $IncludeDisabled) {
+        $computers = $computers | Where-Object { $_.Enabled -eq $true }
+    }
+ 
+    $computers = $computers | Where-Object { $_.OperatingSystem -like 'Windows*' }
+    if (-not $IncludeServers) {
+        $computers = $computers | Where-Object { $_.OperatingSystem -notmatch 'Server' }
+    }
+    if (-not $IncludeWorkstations) {
+        $computers = $computers | Where-Object { $_.OperatingSystem -match 'Server' }
+    }
+ 
+    if (-not $computers) {
+        Write-Verbose "No computer accounts found with the specified criteria."
+        return
+    }
+ 
+    Write-Verbose ("Using AD domain: {0} | Server: {1} | Search base: {2}" -f $domainInfo.DNSRoot, $adServer, $ADSearchBase)
+ 
+    $outputProps = $Properties | Select-Object -Unique
+    $computers | Select-Object $outputProps | Sort-Object Name
+}
+catch {
+    Write-Error $_.Exception.Message
+    if ($_.Exception.InnerException) {
+        Write-Error $_.Exception.InnerException.Message
+    }
+    exit 1
+}
+ 
+# Onboard each discovered computer into DVLS PAM
+foreach ($computer in $computers) {
+    # Compose the provider/scan name (adjust to your naming convention)
+    $computerName = "<String before computer name>"+$computer.Name
+ 
+    # Look up an existing provider so we can update it, otherwise create a fresh one
+    $provider = Get-DSPamProviders | Where-Object { $_.Label -eq $computerName }
+ 
+    if ($provider) {
+        Write-Host "PAM Provider '$computerName' already exists. Skipping creation." -ForegroundColor Yellow
+    } else {
+        New-DSPamProvider -Name $computerName -CredentialType DomainUser -Username 'HOMESRV\administrator' -Password 'Sijelepouvais3030@'
+        Write-Host "Created PAM Provider '$computerName'." -ForegroundColor Green
+    
+ 
+    # Retrieve the provider again to ensure we have the latest object/identifier
+    $provider = Get-DSPamProviders | Where-Object { $_.Label -eq $computerName }
+    $provider.CredentialType = "WindowsLocalAccount"
+    $hostname = $computer.Name+".homesrv.local"
+    $provider.HostName = $hostname
+    Update-DSPamProvider -InputObject $provider
+ 
+    # Kick off a scan configuration for the newly associated provider
+    New-DSPamScanConfiguration -Name $computerName -Provider $provider -Type Windows -ScanNow
+    }
+}
