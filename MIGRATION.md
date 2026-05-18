@@ -53,7 +53,7 @@ Column meanings:
 | `DVLS/security/Set-DSFolderPermissions.ps1` | `src/DVLS/security/Set-DSFolderPermissions.ps1` | todo | medium | ☐ |  |
 | `Hub/Security/ExportPermission.ps1` | `src/Hub/security/ExportPermission.ps1` | todo | medium | ☐ | Case-normalized target folder (`Security` → `security`). |
 | `RDM/datasource/Assign-UserLicenses.ps1` | `src/RDM/datasource/Assign-UserLicenses.ps1` | todo | medium | ☐ |  |
-| `RDM/datasource/New-RDMDataSource_allowOffline.ps1` | `src/RDM/datasource/New-RDMDataSource_allowOffline.ps1` | todo | medium | ☐ |  |
+| `RDM/datasource/New-RDMDataSource_allowOffline.ps1` | `src/RDM/datasource/New-RDMSampleSQLServerDataSource.ps1` | todo | medium | ☑ | Renamed — `_allowOffline` suffix dropped; offline mode behavior documented in the docstring. |
 | `RDM/entries/Create User Vault Entry Using Credentials Obtained From External Source.md` | `src/RDM/entries/Create User Vault Entry Using Credentials Obtained From External Source.md` | todo | low | ☐ | `.md` documentation snippet rather than a script — confirm product classification during migration. |
 | `RDM/entries/MassEdits/ConvertVirtualFolders.ps1` | `src/RDM/entries/MassEdits/ConvertVirtualFolders.ps1` | todo | medium | ☐ |  |
 | `RDM/entries/MassEdits/ManageSubEntries.ps1` | `src/RDM/entries/MassEdits/ManageSubEntries.ps1` | todo | medium | ☐ |  |
