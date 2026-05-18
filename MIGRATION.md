@@ -72,7 +72,7 @@ Column meanings:
 | `RDM/security/ChangeUserGroupOfflineMode.ps1` | `src/RDM/security/ChangeUserGroupOfflineMode.ps1` | todo | medium | ☐ |  |
 | `RDM/security/Export-RDMPermissions.ps1` | `src/RDM/security/Export-RDMPermissions.ps1` | todo | medium | ☐ |  |
 | `RDM/security/Export-UserRolePermissions.ps1` | `src/RDM/security/Export-UserRolePermissions.ps1` | todo | medium | ☐ |  |
-| `RDM/security/RenameRDMRole.ps1` | `src/RDM/security/RenameRDMRole.ps1` | todo | medium | ☑ | Renamed — `_allowOffline` suffix dropped; offline mode behavior documented in the docstring. |
+| `RDM/security/RenameRDMRole.ps1` | `src/RDM/security/RenameRDMRole.ps1` | todo | medium | ☐ |  |
 | `RDM/security/SetPermissionsonFoldersInVault.ps1` | `src/RDM/security/SetPermissionsonFoldersInVault.ps1` | todo | medium | ☐ |  |
 <!-- END MIGRATION TABLE -->
 
