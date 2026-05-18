@@ -19,7 +19,7 @@ One PR per source folder, smallest first:
 2. `DVLS/security/` → `src/DVLS/security/`
 3. `DVLS/entries/` → `src/DVLS/entries/`
 4. `RDM/security/` → `src/RDM/security/`
-5. `RDM/datasource/` → `src/RDM/datasource/`
+5. `RDM/datasource/` → `src/RDM/workspace/` (folder renamed: the product calls the concept "workspace" now; the legacy folder name is preserved at the repo root)
 6. `RDM/export/` → `src/RDM/export/`
 7. `RDM/import/` → `src/RDM/import/`
 8. `RDM/entries/` → `src/RDM/entries/`
@@ -52,8 +52,8 @@ Column meanings:
 | `DVLS/security/Export-DSFolderPermissions.ps1` | `src/DVLS/security/Export-DSFolderPermissions.ps1` | todo | medium | ☐ |  |
 | `DVLS/security/Set-DSFolderPermissions.ps1` | `src/DVLS/security/Set-DSFolderPermissions.ps1` | todo | medium | ☐ |  |
 | `Hub/Security/ExportPermission.ps1` | `src/Hub/security/ExportPermission.ps1` | todo | medium | ☐ | Case-normalized target folder (`Security` → `security`). |
-| `RDM/datasource/Assign-UserLicenses.ps1` | `src/RDM/datasource/Assign-UserLicenses.ps1` | todo | medium | ☐ |  |
-| `RDM/datasource/New-RDMDataSource_allowOffline.ps1` | `src/RDM/datasource/New-RDMSQLServerDataSource.ps1` | todo | medium | ☑ | Renamed — `_allowOffline` suffix dropped; offline mode behavior documented in the docstring. |
+| `RDM/datasource/Assign-UserLicenses.ps1` | `src/RDM/workspace/Assign-UserLicenses.ps1` | todo | medium | ☐ |  |
+| `RDM/datasource/New-RDMDataSource_allowOffline.ps1` | `src/RDM/workspace/New-RDMSQLServerWorkspace.ps1` | todo | medium | ☑ | Renamed to match product terminology (data source → workspace); `_allowOffline` suffix dropped; offline behavior documented in the docstring. |
 | `RDM/entries/Create User Vault Entry Using Credentials Obtained From External Source.md` | `src/RDM/entries/Create User Vault Entry Using Credentials Obtained From External Source.md` | todo | low | ☐ | `.md` documentation snippet rather than a script — confirm product classification during migration. |
 | `RDM/entries/MassEdits/ConvertVirtualFolders.ps1` | `src/RDM/entries/MassEdits/ConvertVirtualFolders.ps1` | todo | medium | ☐ |  |
 | `RDM/entries/MassEdits/ManageSubEntries.ps1` | `src/RDM/entries/MassEdits/ManageSubEntries.ps1` | todo | medium | ☐ |  |
