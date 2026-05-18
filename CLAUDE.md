@@ -68,7 +68,11 @@ targets:
 1. `/migrate <legacy-path>` — copies forward to `src/<same-path>`, infers front matter via AST walk, leaves legacy file untouched.
 2. Review the inferred fields (especially `cmdlets` and `params`).
 3. `/lint src/<folder>` to resolve any analyzer warnings on the new file.
-4. `/build-catalog -UpdateMigrationDoc` to refresh `MIGRATION.md`.
+4. `/build-catalog -UpdateMigrationDoc` to refresh the `migrated` column in `MIGRATION.md` (the `intent`, `priority`, and `notes` columns are hand-curated and preserved across runs).
+
+### Skipping a legacy script
+
+If a legacy file should not be migrated at all (obsolete sample, replaced by a different mechanism, etc.), edit its row in `MIGRATION.md` and set `intent: deprecated`. The file stays at its legacy path indefinitely. Do **not** create a counterpart under `src/`.
 
 ## Idioms to reuse
 

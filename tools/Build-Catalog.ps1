@@ -182,31 +182,105 @@ if ($UpdateMigrationDoc) {
         Write-Warning "MIGRATION.md not found; skipping table update."
     }
     else {
-        $migContent = Get-Content -LiteralPath $migPath -Raw
-        $tableSb = [System.Text.StringBuilder]::new()
-        [void]$tableSb.AppendLine('| legacy_path | target_src_path | migrated |')
-        [void]$tableSb.AppendLine('|---|---|---|')
-        $migratedBySrcPath = @{}
-        foreach ($e in $active) { $migratedBySrcPath[$e.path] = $true }
-        foreach ($e in $legacy | Sort-Object path) {
-            $legacyPath = $e.path
-            $targetPath = 'src/' + $legacyPath
-            $checked = if ($migratedBySrcPath.ContainsKey($targetPath)) { '☑' } else { '☐' }
-            [void]$tableSb.AppendLine("| ``$legacyPath`` | ``$targetPath`` | $checked |")
-        }
+        $migContent  = Get-Content -LiteralPath $migPath -Raw
         $markerStart = '<!-- BEGIN MIGRATION TABLE -->'
         $markerEnd   = '<!-- END MIGRATION TABLE -->'
-        $newSection  = "$markerStart`n" + $tableSb.ToString() + $markerEnd
-        $idxStart = $migContent.IndexOf($markerStart)
-        $idxEnd   = $migContent.IndexOf($markerEnd)
-        if ($idxStart -ge 0 -and $idxEnd -gt $idxStart) {
-            $idxEnd += $markerEnd.Length
-            $updated = $migContent.Substring(0, $idxStart) + $newSection + $migContent.Substring($idxEnd)
-            Set-Content -LiteralPath $migPath -Value $updated -Encoding utf8
-            Write-Host "Refreshed migration table in MIGRATION.md."
+        $idxStart    = $migContent.IndexOf($markerStart)
+        $idxEnd      = $migContent.IndexOf($markerEnd)
+
+        if ($idxStart -lt 0 -or $idxEnd -le $idxStart) {
+            Write-Warning "Migration markers not found in MIGRATION.md — table not updated."
         }
         else {
-            Write-Warning "Migration markers not found in MIGRATION.md — table not updated."
+            $sectionStart = $idxStart + $markerStart.Length
+            $section      = $migContent.Substring($sectionStart, $idxEnd - $sectionStart)
+
+            # Parse existing rows. Schema (6 columns):
+            # legacy_path | target_src_path | intent | priority | migrated | notes
+            $existingRows = [ordered]@{}
+            foreach ($line in ($section -split "`r?`n")) {
+                $trim = $line.Trim()
+                if (-not $trim.StartsWith('|')) { continue }
+                # Skip header and separator rows.
+                if ($trim -match '^\|\s*legacy_path') { continue }
+                if ($trim -match '^\|\s*-{2,}') { continue }
+                $cells = $trim.Trim('|').Split('|') | ForEach-Object { $_.Trim() }
+                if ($cells.Count -lt 6) { continue }
+                $key = $cells[0].Trim('`').Trim()
+                if (-not $key) { continue }
+                $existingRows[$key] = [pscustomobject]@{
+                    legacy_path     = $cells[0].Trim('`').Trim()
+                    target_src_path = $cells[1].Trim('`').Trim()
+                    intent          = $cells[2]
+                    priority        = $cells[3]
+                    migrated        = $cells[4]
+                    notes           = $cells[5]
+                }
+            }
+
+            # Build the set of legacy paths we observe on disk now.
+            $observed = [ordered]@{}
+            foreach ($e in $legacy | Sort-Object path) {
+                $observed[$e.path] = $true
+            }
+
+            # Set of src/ paths declared active, for migrated computation.
+            $activeSrcPaths = @{}
+            foreach ($e in $active) { $activeSrcPaths[$e.path] = $true }
+
+            # Compose rebuilt rows: union of (observed legacy files) and (rows already in table).
+            # New observations get default intent/priority/notes; existing rows keep them.
+            $allKeys = New-Object System.Collections.Generic.List[string]
+            foreach ($k in $existingRows.Keys) { $allKeys.Add($k) }
+            foreach ($k in $observed.Keys) {
+                if (-not $existingRows.Contains($k)) { $allKeys.Add($k) }
+            }
+
+            $rowsOut = New-Object System.Collections.Generic.List[psobject]
+            foreach ($k in ($allKeys | Sort-Object -Unique)) {
+                $existing = if ($existingRows.Contains($k)) { $existingRows[$k] } else { $null }
+                $defaultTarget = 'src/' + $k
+                # Normalize Hub/Security → Hub/security case if no existing row says otherwise.
+                if ($k -like 'Hub/Security/*') {
+                    $defaultTarget = 'src/Hub/security/' + $k.Substring('Hub/Security/'.Length)
+                }
+                $target = if ($existing) { $existing.target_src_path } else { $defaultTarget }
+                if (-not $target) { $target = $defaultTarget }
+
+                $intent   = if ($existing -and $existing.intent)   { $existing.intent }   else { 'todo' }
+                $priority = if ($existing -and $existing.priority) { $existing.priority } else { 'medium' }
+                $notes    = if ($existing -and $existing.notes)    { $existing.notes }    else { '' }
+
+                $migrated = if ($activeSrcPaths.ContainsKey($target)) { '☑' } else { '☐' }
+                # Deprecated rows: by definition never get a src/ counterpart, so the box stays ☐.
+
+                $stillExists = $observed.ContainsKey($k)
+                if (-not $stillExists -and $intent -ne 'deprecated' -and $notes -notmatch 'file removed') {
+                    $notes = if ($notes) { "$notes; (legacy file removed)" } else { '(legacy file removed)' }
+                }
+
+                $rowsOut.Add([pscustomobject]@{
+                    legacy_path     = $k
+                    target_src_path = $target
+                    intent          = $intent
+                    priority        = $priority
+                    migrated        = $migrated
+                    notes           = $notes
+                })
+            }
+
+            $tableSb = [System.Text.StringBuilder]::new()
+            [void]$tableSb.AppendLine('')
+            [void]$tableSb.AppendLine('| legacy_path | target_src_path | intent | priority | migrated | notes |')
+            [void]$tableSb.AppendLine('|---|---|---|---|---|---|')
+            foreach ($r in $rowsOut) {
+                [void]$tableSb.AppendLine("| ``$($r.legacy_path)`` | ``$($r.target_src_path)`` | $($r.intent) | $($r.priority) | $($r.migrated) | $($r.notes) |")
+            }
+
+            $newSection = $markerStart + $tableSb.ToString() + $markerEnd
+            $updated = $migContent.Substring(0, $idxStart) + $newSection + $migContent.Substring($idxEnd + $markerEnd.Length)
+            Set-Content -LiteralPath $migPath -Value $updated -Encoding utf8
+            Write-Host "Refreshed migration table in MIGRATION.md ($($rowsOut.Count) rows)."
         }
     }
 }
