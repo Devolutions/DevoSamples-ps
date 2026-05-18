@@ -1,0 +1,7 @@
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+.claude/settings.local.json
+catalog.json.tmp

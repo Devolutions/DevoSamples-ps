@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devolutions.net/devosamples-ps/frontmatter.schema.json",
+  "title": "DevoSamples-ps Front Matter",
+  "description": "Inline YAML metadata block carried in every .ps1 / .md sample under src/. Lives inside a <#FRONTMATTER ... FRONTMATTER#> block for .ps1 or <!--FRONTMATTER ... FRONTMATTER--> for .md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "product", "category", "script_version", "status", "targets"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]*$",
+      "description": "Stable identifier. Conventionally the function name (Update-DSCredentialPassword) or a kebab/dot-cased slug for batch actions."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "product": {
+      "type": "string",
+      "enum": ["DVLS", "RDM", "Hub", "RDMBatchAction"]
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Sub-area under the product (entries, security, datasource, export, import, etc.)."
+    },
+    "script_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[A-Za-z0-9.-]+)?$",
+      "description": "SemVer of the script itself. Bumped on substantive edit."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "legacy", "deprecated"]
+    },
+    "targets": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "devolutions_powershell": { "$ref": "#/$defs/versionRange" },
+        "rdm":                    { "$ref": "#/$defs/versionRange" },
+        "dvls":                   { "$ref": "#/$defs/versionRange" },
+        "hub":                    { "$ref": "#/$defs/versionRange" }
+      },
+      "description": "Per-product compatibility window. Keys are surfaces this script touches; omit any that don't apply."
+    },
+    "deprecated_after": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^(\\d{4}-\\d{2}-\\d{2}|\\d+\\.\\d+(\\.\\d+)?)$" }
+      ],
+      "description": "When the script is scheduled for retirement. ISO date or product version."
+    },
+    "cmdlets": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Devolutions cmdlets called by this script. Used for catalog cross-reference."
+    },
+    "params": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "additionalProperties": false,
+        "properties": {
+          "name":        { "type": "string" },
+          "type":        { "type": "string" },
+          "mandatory":   { "type": "boolean" },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "requires_module": {
+      "type": "string",
+      "description": "Specific module dependency beyond Devolutions.PowerShell (rare)."
+    },
+    "author": {
+      "type": "string"
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    }
+  },
+  "$defs": {
+    "versionRange": {
+      "type": "object",
+      "required": ["min", "tested_up_to"],
+      "additionalProperties": false,
+      "properties": {
+        "min":           { "type": "string", "pattern": "^\\d+\\.\\d+(\\.\\d+)?$" },
+        "tested_up_to":  { "type": "string", "pattern": "^\\d+\\.\\d+(\\.\\d+)?$" }
+      }
+    }
+  }
+}

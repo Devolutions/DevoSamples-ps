@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://devolutions.net/devosamples-ps/catalog.schema.json",
+  "title": "DevoSamples-ps Catalog",
+  "description": "Machine-readable index emitted by tools/Build-Catalog.ps1. Consumers (agents) filter by effective_status to find scripts compatible with the current Devolutions product version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["generated_at", "product_versions", "entries"],
+  "properties": {
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "product_versions": {
+      "type": "object",
+      "description": "Snapshot of tools/product-versions.psd1 at catalog generation time.",
+      "additionalProperties": { "type": "string" }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "effective_status"],
+        "additionalProperties": true,
+        "properties": {
+          "path":             { "type": "string", "description": "Repo-relative path to the script." },
+          "sha":              { "type": "string", "description": "Git blob SHA of the file content." },
+          "effective_status": {
+            "type": "string",
+            "enum": ["active", "stale", "legacy", "deprecated"],
+            "description": "Computed by Build-Catalog: 'stale' when tested_up_to falls below current product version; 'legacy' for files outside src/; otherwise mirrors declared status."
+          },
+          "frontmatter":      { "type": "object", "description": "Raw front matter as declared in the file (omitted for legacy files without front matter)." }
+        }
+      }
+    }
+  }
+}
