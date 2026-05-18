@@ -13,9 +13,9 @@ targets:
     min: 2024.1
     tested_up_to: 2026.1
 cmdlets:
-  - New-RDMSqliteDataSource
+  - New-RDMDataSource
   - Get-RDMDataSource
-  - Set-RDMCurrentDataSource
+  - Set-RDMDataSource
 params:
   - name: Name
     type: string
@@ -32,19 +32,19 @@ FRONTMATTER#>
 
 <#
 .SYNOPSIS
-Create a SQLite data source (no master password) and make it the active one.
+Create a SQLite RDM data source (no master password) and save it.
 
 .DESCRIPTION
 Provides New-RDMSampleSqliteDataSource, which registers a new RDM data source
 backed by a SQLite database file. The data source is created without a master
-password (sessions stored unencrypted at rest) and is set as the current data
-source on success.
+password (sessions stored unencrypted at rest) and saved to RDM's data source
+configuration.
 
 .PARAMETER Name
 Display name for the new data source. Must be unique within RDM.
 
 .PARAMETER DatabasePath
-Full path to the SQLite .db file. The file is created if it does not exist.
+Full path to the SQLite .db file. RDM creates the file if it does not exist.
 
 .EXAMPLE
 New-RDMSampleSqliteDataSource -Name "Local Sandbox" -DatabasePath "C:\rdm\sandbox.db"
@@ -67,6 +67,6 @@ function New-RDMSampleSqliteDataSource
         throw "A data source named '$Name' already exists."
     }
 
-    $dataSource = New-RDMSqliteDataSource -Name $Name -Database $DatabasePath
-    Set-RDMCurrentDataSource -DataSource $dataSource
+    $dataSource = New-RDMDataSource -SQLite -Name $Name -Database $DatabasePath
+    Set-RDMDataSource $dataSource
 }
