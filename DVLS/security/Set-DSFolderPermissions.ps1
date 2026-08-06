@@ -156,11 +156,57 @@ function Edit-DSSecurityProperty ()
 }
 
 <#
+Function: Get-DSPreservedViewPermission
+
+Description: Build a View permission object reflecting the folder's current View state (viewOverride / viewRoles).
+    Set-DSEntityPermission clears the View permission whenever it is called without a View permission in its set.
+    Passing the result of this function back into Set-DSEntityPermission when updating a non-View right keeps the
+    existing View permission intact. Returns $null when there is no custom View permission to preserve.
+
+Parameter:
+    Folder: the folder entry object (as returned by Get-DSEntry) whose View permission must be preserved.
+#>
+function Get-DSPreservedViewPermission ()
+{
+    param (
+        $Folder
+    )
+
+    if (-not $Folder.security -or -not ($Folder.security.PSObject.Properties.Name -contains 'viewOverride'))
+    {
+        return $null
+    }
+
+    $viewOverride = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleOverride]$Folder.security.viewOverride
+
+    $viewRoles = @()
+    if (($Folder.security.PSObject.Properties.Name -contains 'viewRoles') -and $Folder.security.viewRoles)
+    {
+        $viewRoles = @($Folder.security.viewRoles | ForEach-Object { [string]$_ })
+    }
+
+    # Nothing custom to preserve: View is inheriting from the parent and has no explicit roles.
+    if (($viewOverride -eq [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleOverride]::Inherited -or
+         $viewOverride -eq [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleOverride]::Default) -and
+        $viewRoles.Count -eq 0)
+    {
+        return $null
+    }
+
+    $viewPerm = New-Object RemoteDesktopManager.PowerShellModule.Private.models.ConnectionPermission
+    $viewPerm.Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::View
+    $viewPerm.Override = $viewOverride
+    $viewPerm.Roles = $viewRoles
+
+    return $viewPerm
+}
+
+<#
 Function: Set-DSFolderPermissions
 
 Description: Set the permissions on a folder with the given users and/or uer groups.
 
-Parameter: 
+Parameter:
     CSVFilePath: path and filename of the CSV file that contains the permissions to update.
 #>
 function Set-DSFolderPermissions ()
@@ -202,7 +248,7 @@ function Set-DSFolderPermissions ()
             "Move" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::Move; Break}
             "Delete" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::Delete; Break}
             "ViewPassword" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::ViewPassword; Break}
-            "ViewSensitive" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::ViewSensitive; Break}
+            "ViewSensitive" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::ViewSensitiveInformation; Break}
             "EditSecurity" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::EditSecurity; Break}
             "ConnectionHistory" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::ConnectionHistory; Break}
             "PasswordHistory" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::PasswordHistory; Break}
@@ -213,15 +259,90 @@ function Set-DSFolderPermissions ()
             "Handbook" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::Handbook; Break}
             "EditHandbook" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::EditHandbook; Break}
             "EditInformation" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::EditInformation; Break}
+            "Connect" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::Execute; Break}
+            "Execute" {$Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::Execute; Break}
         }
 
         # Retrieve back the entry properties if it has been update from above Add or Edit security properties functions
         $Folder = Get-DSEntry -EntryID $FolderID
 
         # Right to update
+        # The View right is stored differently from every other right. It does NOT live in
+        # security.permissions[]; it lives in security.viewOverride + security.viewRoles and is
+        # only honored when the folder's roleOverride is Custom. Handle it explicitly here.
+        if ($Right -eq [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::View)
+        {
+            # The View right lives in security.viewOverride + security.viewRoles (not in the permissions[]
+            # array) and is only honored when roleOverride is Custom. Set-DSEntityPermission knows how to
+            # route a View permission to those fields and rebuilds the security object itself, so drive the
+            # update through it. This also avoids touching $Folder.security, which can be null on a folder
+            # that inherits its permissions.
+            $viewPerm = New-Object RemoteDesktopManager.PowerShellModule.Private.models.ConnectionPermission
+            $viewPerm.Right = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleRight]::View
+
+            switch ($Role)
+            {
+                "Custom"
+                {
+                    $ItemsID = @()
+
+                    foreach ($Item in $Items)
+                    {
+                        $user = Get-DSUser -All | where {$_.Name -eq $Item}
+                        if ($user)
+                        {
+                            $ItemsID += [string]$user.ID
+                        }
+
+                        $usergroup = Get-DSRole -All | where {$_.Name -eq $Item}
+                        If ($usergroup)
+                        {
+                            $ItemsID += [string]$usergroup.ID
+                        }
+                    }
+
+                    $existingViewRoles = @()
+                    if ($Folder.security -and ($Folder.security.PSObject.Properties.Name -contains 'viewRoles') -and $Folder.security.viewRoles)
+                    {
+                        $existingViewRoles = @($Folder.security.viewRoles | ForEach-Object { [string]$_ })
+                    }
+
+                    if ($Operation -eq "Append")
+                    {
+                        $viewPerm.Roles = @($existingViewRoles + $ItemsID | Select-Object -Unique)
+                    }
+                    else
+                    {
+                        $viewPerm.Roles = @($ItemsID)
+                    }
+
+                    $viewPerm.Override = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleOverride]::Custom
+                    Break
+                }
+                "Inherited"
+                {
+                    # viewOverride = Inherited means the View right is inherited from the parent folder.
+                    $viewPerm.Override = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleOverride]::Inherited
+                    $viewPerm.Roles = @()
+                    Break
+                }
+                "Never"
+                {
+                    # viewOverride = Never (Disallowed) grants View to no one but the administrators.
+                    $viewPerm.Override = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleOverride]::Never
+                    $viewPerm.Roles = @()
+                    Break
+                }
+            }
+
+            Set-DSEntityPermission -EntityID $FolderID -Permissions $viewPerm
+            $Folder = Get-DSEntry -EntryID $FolderID
+        }
+        else
+        {
         switch ($Role)
         {
-            "Custom" 
+            "Custom"
             {
                 if ($Folder.security.permissions -eq $null)
                 {
@@ -246,7 +367,12 @@ function Set-DSFolderPermissions ()
 
                     $perms.roles += $ItemsID
 
-                    Set-DSEntityPermission -EntityID $FolderID -Permissions $perms
+                    # Preserve the existing View permission, which Set-DSEntityPermission would otherwise clear.
+                    $permsToSet = @($perms)
+                    $viewPerm = Get-DSPreservedViewPermission -Folder $Folder
+                    if ($viewPerm) { $permsToSet += $viewPerm }
+
+                    Set-DSEntityPermission -EntityID $FolderID -Permissions $permsToSet
                     $Folder = Get-DSEntry -EntryID $FolderID
                 }
                 else 
@@ -280,7 +406,13 @@ function Set-DSFolderPermissions ()
                                     }
 
                                     $perms.Roles = $permissions.roles + $ItemsID
-                                    Set-DSEntityPermission -EntityID $FolderID -Permissions $perms
+
+                                    # Preserve the existing View permission, which Set-DSEntityPermission would otherwise clear.
+                                    $permsToSet = @($perms)
+                                    $viewPerm = Get-DSPreservedViewPermission -Folder $Folder
+                                    if ($viewPerm) { $permsToSet += $viewPerm }
+
+                                    Set-DSEntityPermission -EntityID $FolderID -Permissions $permsToSet
                                     $Folder = Get-DSEntry -EntryID $FolderID
                                     $updatePerm = $true
                                     Break
@@ -302,7 +434,13 @@ function Set-DSFolderPermissions ()
                                         }
                                     }
                                     $perms.roles = $ItemsID
-                                    Set-DSEntityPermission -EntityID $FolderID -Permissions $perms
+
+                                    # Preserve the existing View permission, which Set-DSEntityPermission would otherwise clear.
+                                    $permsToSet = @($perms)
+                                    $viewPerm = Get-DSPreservedViewPermission -Folder $Folder
+                                    if ($viewPerm) { $permsToSet += $viewPerm }
+
+                                    Set-DSEntityPermission -EntityID $FolderID -Permissions $permsToSet
                                     $Folder = Get-DSEntry -EntryID $FolderID
                                     $updatePerm = $true
                                     Break
@@ -338,7 +476,12 @@ function Set-DSFolderPermissions ()
                             $perms.roles = $ItemsID
                         }
                         
-                        Set-DSEntityPermission -EntityID $FolderID -Permissions $perms
+                        # Preserve the existing View permission, which Set-DSEntityPermission would otherwise clear.
+                        $permsToSet = @($perms)
+                        $viewPerm = Get-DSPreservedViewPermission -Folder $Folder
+                        if ($viewPerm) { $permsToSet += $viewPerm }
+
+                        Set-DSEntityPermission -EntityID $FolderID -Permissions $permsToSet
                         $Folder = Get-DSEntry -EntryID $FolderID
                         $updatePerm = $true
                     }
@@ -354,6 +497,7 @@ function Set-DSFolderPermissions ()
                 $Folder.security.roleOverride  = [RemoteDesktopManager.PowerShellModule.Private.enums.SecurityRoleOverride]::Never
                 Break
             }
+        }
         }
 
         $group = $Folder.group.Replace($Folder.name, "")
